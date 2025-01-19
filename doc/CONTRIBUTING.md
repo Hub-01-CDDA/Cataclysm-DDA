@@ -64,7 +64,7 @@ There are a couple of guidelines we suggest sticking to (see [#Example Workflow]
 ## Code Style
 
 Code style is enforced across the codebase by `astyle`.
-See [CODE_STYLE](../doc/CODE_STYLE.md) for details.
+See [CODE_STYLE](../doc/c++/CODE_STYLE.md) for details.
 
 ## Translations
 
@@ -138,6 +138,8 @@ Helpful pages:
 *(This only needs to be done once.)*
 
 1. [Fork](https://github.com/CleverRaven/Cataclysm-DDA/fork) this repository here on GitHub.
+
+**Note:** Fork is different from branch, branches are covered [later](#make-your-changes).
 
 2. Clone your fork locally.
 
@@ -266,7 +268,7 @@ When your PR should close an issue, please include [closing keywords](https://he
 
 ## Tooling support
 
-Various tools are available to help you keep your contributions conforming to the appropriate style. See [DEVELOPER_TOOLING.md](../doc/DEVELOPER_TOOLING.md) for more details.
+Various tools are available to help you keep your contributions conforming to the appropriate style. See [DEVELOPER_TOOLING.md](../doc/c++/DEVELOPER_TOOLING.md) for more details.
 
 ## Advanced Techniques
 
@@ -324,7 +326,7 @@ You can also set the tracking information at the same time as creating the branc
 There is a suite of tests built into the source tree at tests/  
 You should run the test suite after ANY change to the game source.  
 An ordinary invocation of `make` will build the test executable at `tests/cata_test`, and it can be invoked like any ordinary executable, or via `make check`.
-Running `test/cata_test` with no arguments will run the entire test suite; running it with `--help` will print a number of invocation options you can use to adjust its operation.
+Running `tests/cata_test` with no arguments will run the entire test suite; running it with `--help` will print a number of invocation options you can use to adjust its operation.
 
 ```bash
 $ make
@@ -339,9 +341,9 @@ The test took 41.772 seconds
 
 It is recommended to habitually invoke make like ``make YOUR BUILD OPTIONS && make check``.
 
-If you're working with Visual Studio (and don't have `make`), see [Visual Studio-specific advice](../doc/COMPILING/COMPILING-VS-VCPKG.md#running-unit-tests).
+If you're working with Visual Studio (and don't have `make`), see [Visual Studio-specific advice](../doc/c++/COMPILING-VS-VCPKG.md#running-unit-tests).
 
-If you want/need to add a test, see [TESTING.md](../doc/TESTING.md)
+If you want/need to add a test, see [TESTING.md](../doc/c++/TESTING.md)
 
 ## In-game testing, test environment and the debug menu
 
@@ -366,7 +368,7 @@ Bring up the keybindings menu (press `Escape` then `1`), scroll down almost to t
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-With these commands, you should be able to recreate the proper conditions to test your changes. You can find some more information about the debug menu on [the official wiki](http://cddawiki.chezzo.com/cdda_wiki/index.php).
+With these commands, you should be able to recreate the proper conditions to test your changes.
 
 ## Frequently Asked Questions
 

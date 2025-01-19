@@ -63,16 +63,18 @@ $(PCH_P): $(PCH_H)
 TEST_BATCHES = "crafting_skill_gain" "[slow]\ ~crafting_skill_gain" "~[slow]\ ~[.]"
 
 $(TEST_BATCHES): $(TEST_TARGET)
-	cd .. && tests/$(TEST_TARGET) --min-duration 0.2 --rng-seed time $@
+	cd .. && tests/$(TEST_TARGET) --min-duration 0.2 --rng-seed time --order lex $@
 
 check: $(TEST_TARGET) $(TEST_BATCHES)
 
 check-single: $(TEST_TARGET)
-	cd .. && tests/$(TEST_TARGET) --min-duration 0.2 --rng-seed time
+	cd .. && tests/$(TEST_TARGET) --min-duration 0.2 --rng-seed time --order lex
 
-clean:
+clean: clean-pch
 	rm -rf *obj *objwin
 	rm -f *cata_test
+
+clean-pch:
 	rm -f pch/*pch.hpp.gch
 	rm -f pch/*pch.hpp.pch
 	rm -f pch/*pch.hpp.d
@@ -90,7 +92,7 @@ $(ODIR)/%.inc: %.cpp
 .PHONY: includes
 includes: $(OBJS:.o=.inc)
 
-.PHONY: clean check check-single tests precompile_header
+.PHONY: clean clean-pch check check-single tests precompile_header
 
 .SECONDARY: $(OBJS)
 

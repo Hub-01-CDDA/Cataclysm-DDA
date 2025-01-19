@@ -106,6 +106,8 @@ void relic_procgen_data::load_relic_procgen_data( const JsonObject &jo, const st
     relic_procgen_data_factory.load( jo, src );
 }
 
+relic::~relic() = default;
+
 void relic::add_active_effect( const fake_spell &sp )
 {
     active_effects.emplace_back( sp );
@@ -164,7 +166,7 @@ void relic_procgen_data::enchantment_active::deserialize( const JsonObject &jobj
     load( jobj );
 }
 
-void relic_procgen_data::load( const JsonObject &jo, const std::string & )
+void relic_procgen_data::load( const JsonObject &jo, const std::string_view )
 {
     for( const JsonObject jo_inner : jo.get_array( "passive_add_procgen_values" ) ) {
         int weight = 0;
@@ -243,7 +245,6 @@ void relic_charge_template::deserialize( const JsonObject &jo )
 {
     load( jo );
 }
-
 
 void relic_charge_template::load( const JsonObject &jo )
 {
@@ -353,7 +354,13 @@ void relic::load( const JsonObject &jo )
         for( JsonObject jobj : jo.get_array( "passive_effects" ) ) {
             enchant_cache ench;
             ench.load( jobj );
-            add_passive_effect( ench );
+            if( !ench.id.is_empty() ) {
+                // for enchantments by id we need to wait till finalize to cast them to objects
+                // for now stash them
+                passive_enchant_ids.push_back( ench.id );
+            } else {
+                add_passive_effect( ench );
+            }
         }
     }
     jo.read( "charge_info", charge );
@@ -362,6 +369,14 @@ void relic::load( const JsonObject &jo )
     }
     jo.read( "name", item_name_override );
     moves = jo.get_int( "moves", 100 );
+}
+
+void relic::finalize()
+{
+    // add the enchantments that we couldn't earlier in the load
+    for( const enchantment_id &ench : passive_enchant_ids ) {
+        add_passive_effect( ench.obj() );
+    }
 }
 
 void relic::deserialize( const JsonObject &jobj )
@@ -406,11 +421,11 @@ int relic::activate( Creature &caster, const tripoint &target )
         caster.add_msg_if_player( m_bad, _( "This artifact lacks the charges to activate." ) );
         return 0;
     }
-    caster.moves -= moves;
+    caster.mod_moves( -moves );
     for( const fake_spell &sp : active_effects ) {
-        spell casting = sp.get_spell( sp.level );
-        casting.cast_all_effects( caster, target );
-        caster.add_msg_if_player( casting.message() );
+        spell casting = sp.get_spell( caster, sp.level );
+        casting.cast_all_effects( caster, tripoint_bub_ms( target ) );
+        caster.add_msg_if_player( casting.message(), casting.name() );
     }
     charge.charges -= charge.charges_per_use;
     return charge.charges_per_use;
@@ -438,7 +453,7 @@ bool relic::has_recharge() const
 
 // checks if the relic is in the appropriate location to be able to recharge from the weather.
 // does not check the weather type, that job is relegated to the switch in relic::try_recharge()
-static bool can_recharge_solar( const item &it, Character *carrier, const tripoint &pos )
+static bool can_recharge_solar( const item &it, Character *carrier, const tripoint_bub_ms &pos )
 {
     return get_map().is_outside( pos ) && is_day( calendar::turn ) &&
            ( carrier == nullptr ||
@@ -447,14 +462,14 @@ static bool can_recharge_solar( const item &it, Character *carrier, const tripoi
 
 // checks if the relic is in the appropriate location to be able to recharge from the weather.
 // does not check the weather type, that job is relegated to the switch in relic::try_recharge()
-static bool can_recharge_lunar( const item &it, Character *carrier, const tripoint &pos )
+static bool can_recharge_lunar( const item &it, Character *carrier, const tripoint_bub_ms &pos )
 {
     return get_map().is_outside( pos ) && is_night( calendar::turn ) &&
            ( carrier == nullptr ||
              carrier->is_worn( it ) || carrier->is_wielding( it ) );
 }
 
-void relic::try_recharge( item &parent, Character *carrier, const tripoint &pos )
+void relic::try_recharge( item &parent, Character *carrier, const tripoint_bub_ms &pos )
 {
     if( charge.regenerate_ammo && item_can_not_load_ammo( parent ) ) {
         return;
@@ -545,7 +560,6 @@ bool relic::can_recharge( item &parent, Character *carrier ) const
     }
 
     return true;
-
 
 }
 
@@ -698,7 +712,7 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
                     passive_mult_procgen_values.pick();
                 if( mult != nullptr ) {
                     enchant_cache ench;
-                    float value = rng( mult->min_value, mult->max_value );
+                    float value = rng_float( mult->min_value, mult->max_value );
                     ench.add_value_mult( mult->type, value );
                     int negative_ench_attribute = power_level( ench );
                     if( negative_ench_attribute < 0 ) {

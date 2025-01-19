@@ -2,9 +2,8 @@
 #ifndef CATA_SRC_OUTPUT_H
 #define CATA_SRC_OUTPUT_H
 
-#include <functional>
-#include <clocale>
 #include <algorithm>
+#include <clocale>
 #include <cstddef>
 #include <cstdint>
 #include <forward_list>
@@ -12,6 +11,7 @@
 #include <iosfwd>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <stack>
 #include <string>
 #include <type_traits>
@@ -26,7 +26,6 @@
 #include "enums.h"
 #include "item.h"
 #include "line.h"
-#include "optional.h"
 #include "point.h"
 #include "string_formatter.h"
 #include "translations.h"
@@ -92,6 +91,31 @@ using chtype = int;
 #define LINE_OXXX_UNICODE 0x252C
 #define LINE_XXXX_UNICODE 0x253C
 
+#if defined(USE_PDCURSES)
+#undef LINE_XOXO
+#undef LINE_OXOX
+#undef LINE_XXOO
+#undef LINE_OXXO
+#undef LINE_OOXX
+#undef LINE_XOOX
+#undef LINE_XXXO
+#undef LINE_XXOX
+#undef LINE_XOXX
+#undef LINE_OXXX
+#undef LINE_XXXX
+
+#define LINE_XOXO LINE_XOXO_UNICODE
+#define LINE_OXOX LINE_OXOX_UNICODE
+#define LINE_XXOO LINE_XXOO_UNICODE
+#define LINE_OXXO LINE_OXXO_UNICODE
+#define LINE_OOXX LINE_OOXX_UNICODE
+#define LINE_XOOX LINE_XOOX_UNICODE
+#define LINE_XXXO LINE_XXXO_UNICODE
+#define LINE_XXOX LINE_XXOX_UNICODE
+#define LINE_XOXX LINE_XOXX_UNICODE
+#define LINE_OXXX LINE_OXXX_UNICODE
+#define LINE_XXXX LINE_XXXX_UNICODE
+#endif
 // Supports line drawing
 std::string string_from_int( catacurses::chtype ch );
 
@@ -175,14 +199,14 @@ std::string rm_prefix( std::string str, char c1 = '<', char c2 = '>' );
  * If color_error == report_color_error::yes a debugmsg will be shown when the tag is not valid.
  */
 color_tag_parse_result::tag_type update_color_stack(
-    std::stack<nc_color> &color_stack, const std::string &seg,
+    std::stack<nc_color> &color_stack, std::string_view seg,
     report_color_error color_error = report_color_error::yes );
 
 /**
  * Removes the color tags from the input string. This might be required when the string is to
  * be used for functions that don't handle color tags.
  */
-std::string remove_color_tags( const std::string &s );
+std::string remove_color_tags( std::string_view s );
 /*@}*/
 
 /**
@@ -199,7 +223,7 @@ std::vector<std::string> foldstring( const std::string &str, int width, char spl
  * Print text with embedded @ref color_tags, x, y are in curses system.
  * The text is not word wrapped, but may automatically be wrapped on new line characters or
  * when it reaches the border of the window (both is done by the curses system).
- * If the text contains no color tags, it's equivalent to a simple mvprintz.
+ * If the text contains no color tags, it's equivalent to a simple mvwprintz.
  *
  * @param w Window we are drawing in
  * @param p Curses-style coordinates to print text at.
@@ -208,8 +232,8 @@ std::vector<std::string> foldstring( const std::string &str, int width, char spl
  * change to a color according to the color tags that are in the text.
  * @param base_color Base color that is used outside of any color tag.
  **/
-void print_colored_text( const catacurses::window &w, const point &p, nc_color &cur_color,
-                         const nc_color &base_color, const std::string &text,
+void print_colored_text( const catacurses::window &w, const point &p, nc_color &color,
+                         const nc_color &base_color, std::string_view text,
                          report_color_error color_error = report_color_error::yes );
 /**
  * Print word wrapped text (with @ref color_tags) into the window.
@@ -336,17 +360,28 @@ std::string trimmed_name_and_value( const std::string &name, int value,
 std::string trimmed_name_and_value( const std::string &name, const std::string &value,
                                     int field_width );
 
-void wputch( const catacurses::window &w, nc_color FG, int ch );
+void wputch( const catacurses::window &w, const nc_color &FG, int ch );
 // Using int ch is deprecated, use an UTF-8 encoded string instead
-void mvwputch( const catacurses::window &w, const point &p, nc_color FG, int ch );
-void mvwputch( const catacurses::window &w, const point &p, nc_color FG, const std::string &ch );
+void mvwputch( const catacurses::window &w, const point &p, const nc_color &FG, int ch );
+void mvwputch( const catacurses::window &w, const point &p, const nc_color &FG,
+               const std::string &ch );
 // Using int ch is deprecated, use an UTF-8 encoded string instead
-void mvwputch_inv( const catacurses::window &w, const point &p, nc_color FG, int ch );
-void mvwputch_inv( const catacurses::window &w, const point &p, nc_color FG,
+void mvwputch_inv( const catacurses::window &w, const point &p, const nc_color &FG, int ch );
+void mvwputch_inv( const catacurses::window &w, const point &p, const nc_color &FG,
                    const std::string &ch );
 // Using int ch is deprecated, use an UTF-8 encoded string instead
-void mvwputch_hi( const catacurses::window &w, const point &p, nc_color FG, int ch );
-void mvwputch_hi( const catacurses::window &w, const point &p, nc_color FG, const std::string &ch );
+void mvwputch_hi( const catacurses::window &w, const point &p, const nc_color &FG, int ch );
+void mvwputch_hi( const catacurses::window &w, const point &p, const nc_color &FG,
+                  const std::string &ch );
+// draws a colored line of characters
+void mvwhline( const catacurses::window &win, const point &p, const nc_color &color, int ch,
+               int n );
+void mvwvline( const catacurses::window &win, const point &p, const nc_color &color, int ch,
+               int n );
+// draws a filled rectangle starting at p
+void mvwrectf( const catacurses::window &win, const point &p, int ch, int w, int h );
+void mvwrectf( const catacurses::window &win, const point &p, const nc_color &color, int ch, int w,
+               int h );
 
 void mvwprintz( const catacurses::window &w, const point &p, const nc_color &FG,
                 const std::string &text );
@@ -359,7 +394,7 @@ inline void mvwprintz( const catacurses::window &w, const point &p, const nc_col
 
 void wprintz( const catacurses::window &w, const nc_color &FG, const std::string &text );
 template<typename ...Args>
-inline void wprintz( const catacurses::window &w, const nc_color &FG, const char *const mes,
+inline void wprintz( const catacurses::window &w, const nc_color &FG, std::string_view mes,
                      Args &&... args )
 {
     wprintz( w, FG, string_format( mes, std::forward<Args>( args )... ) );
@@ -369,7 +404,7 @@ void draw_custom_border(
     const catacurses::window &w, catacurses::chtype ls = 1, catacurses::chtype rs = 1,
     catacurses::chtype ts = 1, catacurses::chtype bs = 1, catacurses::chtype tl = 1,
     catacurses::chtype tr = 1, catacurses::chtype bl = 1, catacurses::chtype br = 1,
-    const nc_color &FG = BORDER_COLOR, const point &pos = point_zero, int height = 0, int width = 0 );
+    const nc_color &FG = BORDER_COLOR, const point &pos = point::zero, int height = 0, int width = 0 );
 void draw_border( const catacurses::window &w, nc_color border_color = BORDER_COLOR,
                   const std::string &title = "", nc_color title_color = c_light_red );
 void draw_border_below_tabs( const catacurses::window &w, nc_color border_color = BORDER_COLOR );
@@ -410,20 +445,30 @@ class border_helper
 
             int as_curses_line() const;
         };
-        cata::optional<std::map<point, border_connection>> border_connection_map;
+        std::optional<std::map<point, border_connection>> border_connection_map;
 
         std::forward_list<border_info> border_info_list;
 };
 
 std::string word_rewrap( const std::string &ins, int width, uint32_t split = ' ' );
-std::vector<size_t> get_tag_positions( const std::string &s );
-std::vector<std::string> split_by_color( const std::string &s );
+std::vector<size_t> get_tag_positions( std::string_view s );
+std::vector<std::string> split_by_color( std::string_view s );
 
 bool query_yn( const std::string &text );
 template<typename ...Args>
 inline bool query_yn( const char *const msg, Args &&... args )
 {
     return query_yn( string_format( msg, std::forward<Args>( args )... ) );
+}
+
+enum class query_ynq_result {
+    quit, no, yes
+};
+query_ynq_result query_ynq( const std::string &text );
+template<typename ...Args>
+inline query_ynq_result query_ynq( const char *const msg, Args &&... args )
+{
+    return query_ynq( string_format( msg, std::forward<Args>( args )... ) );
 }
 
 bool query_int( int &result, const std::string &text );
@@ -433,7 +478,7 @@ inline bool query_int( int &result, const char *const msg, Args &&... args )
     return query_int( result, string_format( msg, std::forward<Args>( args )... ) );
 }
 
-std::vector<std::string> get_hotkeys( const std::string &s );
+std::vector<std::string> get_hotkeys( std::string_view s );
 
 /**
  * @name Popup windows
@@ -446,7 +491,7 @@ std::vector<std::string> get_hotkeys( const std::string &s );
  *
  * The message is a printf-like string. It may contain @ref color_tags, which are used while printing.
  *
- * - PF_GET_KEY (ignored when combined with PF_NO_WAIT) cancels the popup on *any* user input.
+ * - PF_GET_KEY cancels the popup on *any* user input.
  *   Without the flag the popup is only canceled when the user enters new-line, Space and Escape.
  *   This flag is passed by @ref popup_getkey.
  * - PF_ON_TOP makes the window appear on the top of the screen (at the upper most row). Without
@@ -465,6 +510,8 @@ enum PopupFlags {
     PF_ON_TOP      = 1 << 2,
     PF_FULLSCREEN  = 1 << 3,
 };
+
+PopupFlags popup_flag_from_string( const std::string &str );
 
 template<typename ...Args>
 inline int popup_getkey( const char *const mes, Args &&... args )
@@ -491,6 +538,8 @@ inline void full_screen_popup( const char *mes, Args &&... args )
 /*@}*/
 std::string format_item_info( const std::vector<iteminfo> &vItemDisplay,
                               const std::vector<iteminfo> &vItemCompare );
+void display_item_info( const std::vector<iteminfo> &vItemDisplay,
+                        const std::vector<iteminfo> &vItemCompare );
 
 // the extra data that item_info needs to draw
 struct item_info_data {
@@ -534,6 +583,7 @@ struct item_info_data {
         bool without_getch = false;
         bool without_border = false;
         bool handle_scrolling = false;
+        bool arrow_scrolling = false;
         bool any_input = true;
         bool scrollbar_left = true;
         bool use_full_win = false;
@@ -570,13 +620,11 @@ void draw_item_filter_rules( const catacurses::window &win, int starty, int heig
 std::string item_filter_rule_string( item_filter_type type );
 
 char rand_char();
-int special_symbol( int sym );
-int special_symbol( char sym );
 
 // Remove spaces from the start and the end of a string.
-std::string trim( const std::string &s );
+std::string trim( std::string_view s );
 // Removes trailing periods and exclamation marks.
-std::string trim_trailing_punctuations( const std::string &s );
+std::string trim_trailing_punctuations( std::string_view s );
 // Removes all punctuation except underscore.
 std::string remove_punctuations( const std::string &s );
 // Converts the string to upper case.
@@ -586,7 +634,6 @@ std::string rewrite_vsnprintf( const char *msg );
 
 // TODO: move these elsewhere
 // string manipulations.
-void replace_name_tags( std::string &input );
 void replace_city_tag( std::string &input, const std::string &name );
 void replace_keybind_tag( std::string &input );
 
@@ -621,53 +668,6 @@ std::pair<std::string, nc_color> get_stamina_bar( int cur_stam, int max_stam );
 std::pair<std::string, nc_color> get_light_level( float light );
 
 std::pair<std::string, nc_color> rad_badge_color( int rad );
-
-/**
- * @return String containing the bar. Example: "Label [********    ]".
- * @param val Value to display. Can be unclipped.
- * @param width Width of the entire string.
- * @param label Label before the bar. Can be empty.
- * @param begin Iterator over pairs <double p, char c> (see below).
- * @param end Iterator over pairs <double p, char c> (see below).
- * Where:
- *    p - percentage of the entire bar which can be filled with c.
- *    c - character to fill the segment of the bar with
- */
-
-// MSVC has problem dealing with template functions.
-// Implementing this function in cpp file results link error.
-template<typename RatingIterator>
-inline std::string get_labeled_bar( const double val, const int width, const std::string &label,
-                                    RatingIterator begin, RatingIterator end )
-{
-    std::string result;
-
-    result.reserve( width );
-    if( !label.empty() ) {
-        result += label;
-        result += ' ';
-    }
-    const int bar_width = width - utf8_width( result ) - 2; // - 2 for the brackets
-
-    result += '[';
-    if( bar_width > 0 ) {
-        int used_width = 0;
-        for( RatingIterator it( begin ); it != end; ++it ) {
-            const double factor = std::min( 1.0, std::max( 0.0, it->first * val ) );
-            const int seg_width = static_cast<int>( factor * bar_width ) - used_width;
-
-            if( seg_width <= 0 ) {
-                continue;
-            }
-            used_width += seg_width;
-            result.insert( result.end(), seg_width, it->second );
-        }
-        result.insert( result.end(), bar_width - used_width, ' ' );
-    }
-    result += ']';
-
-    return result;
-}
 
 enum class enumeration_conjunction : int {
     none,
@@ -762,7 +762,39 @@ std::string enumerate_as_string( const Container &cont, F &&string_for,
 std::string formatted_hotkey( const std::string &hotkey, nc_color text_color );
 
 /**
- * @return String containing the bar. Example: "Label [********    ]".
+ * @return String containing the bar. Example: "Label [****--...    ]".
+ * @param val Value to display. Can be unclipped.
+ * @param width Width of the entire string.
+ * @param label Label before the bar. Can be empty.
+ * @param begin Iterator over pairs <double p, char c> (see below).
+ * @param end Iterator over pairs <double p, char c> (see below).
+ * Where:
+ *    p - percentage of the entire bar which can be filled with c.
+ *    c - character to fill the segment of the bar with
+ */
+template<typename BarIterator>
+std::string get_labeled_bar( double val, int width, const std::string &label,
+                             BarIterator begin, BarIterator end );
+
+/**
+ * @return String containing the bar. Example: "Label [****--...    ]".
+ * @param val Value to display. Can be unclipped.
+ * @param width Width of the entire string.
+ * @param label Label before the bar. Can be empty.
+ * @param begin Iterator over collections with at least first two members [double p, char c] (see below).
+ * @param end Iterator over collections with at least first two members [double p, char c] (see below).
+ * Where:
+ *    p - percentage of the entire bar which can be filled with c.
+ *    c - character to fill the segment of the bar with
+ *    and the collection may have additional elements used by the following function parameter
+ * @param printer Function that takes Iterator described above and number of copies of the character to repeat.
+ */
+template<typename BarIterator>
+std::string get_labeled_bar( double val, int width, const std::string &label,
+                             BarIterator begin, BarIterator end, std::function<std::string( BarIterator, int )> printer );
+
+/**
+ * @return String containing the bar. Example: "Label [************]".
  * @param val Value to display. Can be unclipped.
  * @param width Width of the entire string.
  * @param label Label before the bar. Can be empty.
@@ -770,7 +802,7 @@ std::string formatted_hotkey( const std::string &hotkey, nc_color text_color );
  */
 std::string get_labeled_bar( double val, int width, const std::string &label, char c );
 
-void draw_tab( const catacurses::window &w, int iOffsetX, const std::string &sText,
+void draw_tab( const catacurses::window &w, int iOffsetX, std::string_view sText,
                bool bSelected );
 inclusive_rectangle<point> draw_subtab( const catacurses::window &w, int iOffsetX,
                                         const std::string &sText, bool bSelected,
@@ -800,10 +832,10 @@ std::map<std::string, inclusive_rectangle<point>> draw_tabs( const catacurses::w
 // };
 // draw_tabs( w, tabs, current_tab );
 template<typename TabList, typename CurrentTab, typename = std::enable_if_t<
-             std::is_same<CurrentTab,
-                          std::remove_const_t<typename TabList::value_type::first_type>>::value>>
-std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::window &w,
-        const TabList &tab_list, const CurrentTab &current_tab )
+             std::is_same_v<CurrentTab,
+                            std::remove_const_t<typename TabList::value_type::first_type>>>>
+             std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::window &w,
+                     const TabList &tab_list, const CurrentTab &current_tab )
 {
     std::vector<std::string> tab_text;
     std::transform( tab_list.begin(), tab_list.end(), std::back_inserter( tab_text ),
@@ -832,10 +864,10 @@ std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::wi
 // Similar to the above, but where the order of tabs is specified separately
 // TabList is expected to be a map type.
 template<typename TabList, typename TabKeys, typename CurrentTab, typename = std::enable_if_t<
-             std::is_same<CurrentTab,
-                          std::remove_const_t<typename TabList::value_type::first_type>>::value>>
-std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::window &w,
-        const TabList &tab_list, const TabKeys &keys, const CurrentTab &current_tab )
+             std::is_same_v<CurrentTab,
+                            std::remove_const_t<typename TabList::value_type::first_type>>>>
+             std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::window &w,
+                     const TabList &tab_list, const TabKeys &keys, const CurrentTab &current_tab )
 {
     std::vector<typename TabList::value_type> ordered_tab_list;
     for( const auto &key : keys ) {
@@ -887,7 +919,7 @@ best_fit find_best_fit_in_size( const std::vector<int> &size_of_items_to_fit, co
 
 // Legacy function, use class scrollbar instead!
 void draw_scrollbar( const catacurses::window &window, int iCurrentLine,
-                     int iContentHeight, int iNumLines, const point &offset = point_zero,
+                     int iContentHeight, int iNumLines, const point &offset = point::zero,
                      nc_color bar_color = c_white, bool bDoNotScrollToEnd = false );
 void calcStartPos( int &iStartPos, int iCurrentLine, int iContentHeight,
                    int iNumEntries );
@@ -918,9 +950,9 @@ class scrollbar
         // Sets up ability for the scrollbar to be dragged with the mouse
         scrollbar &set_draggable( input_context &ctxt );
         // draw the scrollbar to the window
-        void apply( const catacurses::window &window );
+        void apply( const catacurses::window &window, bool draw_unneeded = false );
         // Checks if the user is dragging the scrollbar with the mouse (set_draggable first)
-        bool handle_dragging( const std::string &action, const cata::optional<point> &coord,
+        bool handle_dragging( const std::string &action, const std::optional<point> &coord,
                               int &position );
     private:
         int offset_x_v, offset_y_v;
@@ -1060,7 +1092,7 @@ class scrolling_text_view
 class scrollingcombattext
 {
     public:
-        enum : int { iMaxSteps = 8 };
+        static constexpr int iMaxSteps = 8;
 
         scrollingcombattext() = default;
 
@@ -1137,8 +1169,7 @@ extern scrollingcombattext SCT;
 
 std::string wildcard_trim_rule( const std::string &pattern_in );
 bool wildcard_match( const std::string &text_in, const std::string &pattern_in );
-std::vector<std::string> string_split( const std::string &text_in, char delim );
-int ci_find_substr( const std::string &str1, const std::string &str2,
+int ci_find_substr( std::string_view str1, std::string_view str2,
                     const std::locale &loc = std::locale() );
 
 std::string format_volume( const units::volume &volume );
@@ -1175,6 +1206,9 @@ int get_terminal_height();
  */
 bool is_draw_tiles_mode();
 
+int get_window_width();
+int get_window_height();
+
 /**
  * Make changes made to the display visible to the user immediately.
  *
@@ -1192,7 +1226,7 @@ void refresh_display();
  * @return Colorized string.
  */
 template<typename F>
-std::string colorize_symbols( const std::string &str, F color_of )
+std::string colorize_symbols( const std::string_view str, F color_of )
 {
     std::string res;
     nc_color prev_color = c_unset;
@@ -1225,9 +1259,9 @@ class tab_list
 {
     private:
         size_t _index = 0;
-        std::vector<std::string> *_list;
+        const std::vector<std::string> *_list;
     public:
-        explicit tab_list( std::vector<std::string> &_list ) : _list( &_list ) {
+        explicit tab_list( const std::vector<std::string> &_list ) : _list( &_list ) {
         }
 
         void last() {
@@ -1250,7 +1284,7 @@ class tab_list
 
         std::string cur() const {
             if( _list->empty() ) {
-                return std::string( "" );
+                return std::string();
             }
             return ( *_list )[_index];
         }

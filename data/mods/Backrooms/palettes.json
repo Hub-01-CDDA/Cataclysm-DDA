@@ -36,14 +36,15 @@
       "r": [ "t_carpet_backrooms" ],
       "s": [ "t_carpet_backrooms" ],
       "t": [ "t_carpet_backrooms" ],
-      "u": [ "t_console_broken" ],
       "x": [ "t_carpet_backrooms" ],
       "y": [ "t_carpet_backrooms" ],
       "z": [ "t_carpet_backrooms" ],
-      "A": [ "t_carpet_backrooms" ]
+      "A": [ "t_carpet_backrooms" ],
+      "U": [ "t_carpet_backrooms" ]
     },
     "furniture": {
       "a": [ [ "f_null", 5 ], [ "f_chair", 10 ] ],
+      "u": [ "f_console_broken" ],
       "b": [ [ "f_null", 5 ], [ "f_camp_chair", 10 ], [ "f_chair", 2 ] ],
       "c": [ "f_table" ],
       "e": [ "f_table" ],
@@ -56,28 +57,35 @@
       "l": [ "f_watercooler" ],
       "m": [ "f_rack_coat" ],
       "n": [ "f_trashcan" ],
-      "p": [ "f_vending_reinforced" ],
       "r": [ [ "f_null", 5 ], [ "f_shredder", 10 ] ],
       "s": [ [ "f_null", 5 ], [ "f_server", 10 ] ],
       "t": [ "f_bookcase" ],
       "x": [ [ "f_rubble", 10 ], [ "f_rubble_rock", 10 ] ],
       "y": [ [ "f_ash", 10 ] ],
-      "A": [ "f_cardboard_box" ]
+      "A": [ "f_cardboard_box" ],
+      "U": [ "f_planter" ]
     },
     "liquids": { "l": { "liquid": "water_clean", "amount": [ 0, 30 ] } },
     "items": {
+      " ": {
+        "item": {
+          "subtype": "distribution",
+          "entries": [ { "item": "null", "prob": 20000 }, { "group": "backrooms_artifacts", "prob": 1 } ]
+        },
+        "chance": 100
+      },
       "c": [ { "item": "backrooms_master_table_office", "chance": 25 } ],
       "e": [ { "item": "backrooms_master_table_office", "chance": 25 } ],
       "f": [ { "item": "backrooms_master_desk", "chance": 33 } ],
       "i": [ { "item": "backrooms_master_filing", "chance": 85 } ],
       "m": [ { "item": "backrooms_master_coat_rack", "chance": 65 } ],
       "n": [ { "item": "backrooms_master_trash", "chance": 40 } ],
-      "p": [ { "item": "backrooms_master_vending", "chance": 95 } ],
       "t": [ { "item": "backrooms_master_bookshelf", "chance": 80 } ],
       "x": [ { "item": "backrooms_master_rubble", "chance": 80 } ],
       "y": [ { "item": "backrooms_master_rubble", "chance": 80 } ],
       "A": [ { "item": "backrooms_master_cardboard", "chance": 50 } ]
     },
+    "vendingmachines": { "p": { "item_group": "backrooms_master_vending", "reinforced": true, "powered": true } },
     "nested": {
       "!": { "chunks": [ [ "null", 10 ], [ "mx_backroom_micro_common", 20 ], [ "mx_backroom_micro_storage", 4 ] ] },
       "@": { "chunks": [ [ "mx_backroom_micro_storage", 20 ] ] },
@@ -114,7 +122,7 @@
       "I": [ "f_locker" ],
       "J": [ "f_locker" ],
       "K": [ "f_workbench" ],
-      "L": [ "f_water_heater" ],
+      "L": [ "f_water_heater", "f_water_heater_family" ],
       "M": [ "f_standing_tank" ],
       "N": [ "f_air_conditioner" ],
       "P": [ "f_air_filter" ],

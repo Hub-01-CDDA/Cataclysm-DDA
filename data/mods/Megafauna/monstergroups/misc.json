@@ -1,7 +1,7 @@
 [
   {
     "type": "monstergroup",
-    "name": "GROUP_DOMESTIC",
+    "id": "GROUP_DOMESTIC",
     "default": "mon_peccary_flathead",
     "is_animal": true,
     "monsters": [
@@ -21,7 +21,7 @@
   },
   {
     "type": "monstergroup",
-    "name": "GROUP_SAFE",
+    "id": "GROUP_SAFE",
     "is_safe": true,
     "is_animal": true,
     "monsters": [
@@ -57,6 +57,7 @@
       { "monster": "mon_turkey", "weight": 10 },
       { "monster": "mon_raccoon", "weight": 10 },
       { "monster": "mon_opossum", "weight": 10 },
+      { "monster": "mon_ferret", "weight": 5 },
       { "monster": "mon_sewer_rat", "weight": 10 },
       { "monster": "mon_black_rat", "weight": 10 },
       { "monster": "mon_rattlesnake", "weight": 10 },

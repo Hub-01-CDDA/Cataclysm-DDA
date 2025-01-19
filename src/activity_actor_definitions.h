@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -19,8 +20,9 @@
 #include "itype.h"
 #include "item_location.h"
 #include "memory_fast.h"
-#include "optional.h"
+#include "pickup.h"
 #include "point.h"
+#include "recipe.h"
 #include "string_id.h"
 #include "type_id.h"
 #include "units.h"
@@ -42,18 +44,19 @@ struct islot_book;
 class aim_activity_actor : public activity_actor
 {
     private:
-        cata::optional<item> fake_weapon;
-        units::energy bp_cost_per_shot = 0_J;
-        std::vector<tripoint> fin_trajectory;
+        std::optional<item> fake_weapon;
+        std::vector<tripoint_bub_ms> fin_trajectory;
 
     public:
-        bool first_turn = true;
         std::string action;
         int aif_duration = 0; // Counts aim-and-fire duration
         bool aiming_at_critter = false; // Whether aiming at critter or a tile
+        bool should_unload_RAS = false;
         bool snap_to_target = false;
+        /* Item location for RAS weapon reload */
+        item_location reload_loc = item_location();
         bool shifting_view = false;
-        tripoint initial_view_offset;
+        tripoint_rel_ms initial_view_offset;
         /** Target UI requested to abort aiming */
         bool aborted = false;
         /** if true abort if no targets are available when re-entering aiming ui after shooting */
@@ -77,16 +80,18 @@ class aim_activity_actor : public activity_actor
         static aim_activity_actor use_wielded();
 
         /** Aiming fake gun provided by a bionic */
-        static aim_activity_actor use_bionic( const item &fake_gun, const units::energy &cost_per_shot );
+        static aim_activity_actor use_bionic( const item &fake_gun );
 
         /** Aiming fake gun provided by a mutation */
         static aim_activity_actor use_mutation( const item &fake_gun );
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_AIM" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_AIM( "ACT_AIM" );
+            return ACT_AIM;
         }
 
         void start( player_activity &act, Character &who ) override;
+        bool check_gun_ability_to_shoot( Character &who, item &it );
         void do_turn( player_activity &act, Character &who ) override;
         void finish( player_activity &act, Character &who ) override;
         void canceled( player_activity &act, Character &who ) override;
@@ -121,8 +126,9 @@ class autodrive_activity_actor : public activity_actor
     public:
         autodrive_activity_actor() = default;
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_AUTODRIVE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_AUTODRIVE( "ACT_AUTODRIVE" );
+            return ACT_AUTODRIVE;
         }
 
         void start( player_activity &, Character & ) override;
@@ -132,6 +138,33 @@ class autodrive_activity_actor : public activity_actor
 
         std::unique_ptr<activity_actor> clone() const override {
             return std::make_unique<autodrive_activity_actor>( *this );
+        }
+
+        void serialize( JsonOut &jsout ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
+};
+
+class bash_activity_actor : public activity_actor
+{
+    private:
+        tripoint_bub_ms target;
+
+    public:
+        explicit bash_activity_actor( const tripoint_bub_ms &where ) : target( where ) {}
+
+        const activity_id &get_type() const override {
+            static const activity_id ACT_BASH( "ACT_BASH" );
+            return ACT_BASH;
+        };
+
+        void start( player_activity &, Character & ) override {}
+        void canceled( player_activity &, Character & ) override {}
+        void finish( player_activity &, Character & ) override {}
+
+        void do_turn( player_activity &, Character & ) override;
+
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<bash_activity_actor>( *this );
         }
 
         void serialize( JsonOut &jsout ) const override;
@@ -152,8 +185,9 @@ class gunmod_remove_activity_actor : public activity_actor
             int gunmod_idx
         ) : moves_total( moves_total ), gun( gun ), gunmod_idx( gunmod_idx ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_GUNMOD_REMOVE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_GUNMOD_REMOVE( "ACT_GUNMOD_REMOVE" );
+            return ACT_GUNMOD_REMOVE;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -174,11 +208,13 @@ class gunmod_remove_activity_actor : public activity_actor
 class hacksaw_activity_actor : public activity_actor
 {
     public:
-        explicit hacksaw_activity_actor( const tripoint &target,
+        explicit hacksaw_activity_actor( const tripoint_bub_ms &target,
                                          const item_location &tool ) : target( target ), tool( tool ) {};
-
-        activity_id get_type() const override {
-            return activity_id( "ACT_HACKSAW" );
+        explicit hacksaw_activity_actor( const tripoint_bub_ms &target, const itype_id &type,
+                                         const tripoint_bub_ms &veh_pos ) : target( target ), type( type ), veh_pos( veh_pos ) {};
+        const activity_id &get_type() const override {
+            static const activity_id ACT_HACKSAW( "ACT_HACKSAW" );
+            return ACT_HACKSAW;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -195,9 +231,10 @@ class hacksaw_activity_actor : public activity_actor
         // debugmsg causes a backtrace when fired during cata_test
         bool testing = false;  // NOLINT(cata-serialize)
     private:
-        tripoint target;
+        tripoint_bub_ms target;
         item_location tool;
-
+        std::optional<itype_id> type;
+        std::optional<tripoint_bub_ms> veh_pos;
         bool can_resume_with_internal( const activity_actor &other,
                                        const Character &/*who*/ ) const override;
 };
@@ -205,10 +242,11 @@ class hacksaw_activity_actor : public activity_actor
 class hacking_activity_actor : public activity_actor
 {
     public:
-        hacking_activity_actor() = default;
+        explicit hacking_activity_actor( const item_location &tool ): tool( tool ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_HACKING" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_HACKING( "ACT_HACKING" );
+            return ACT_HACKING;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -224,6 +262,9 @@ class hacking_activity_actor : public activity_actor
         }
         void serialize( JsonOut &jsout ) const override;
         static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
+
+    private:
+        item_location tool;
 };
 
 class bookbinder_copy_activity_actor: public activity_actor
@@ -241,14 +282,19 @@ class bookbinder_copy_activity_actor: public activity_actor
             const recipe_id &rec_id
         ) : book_binder( book_binder ), rec_id( rec_id ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_BINDER_COPY_RECIPE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_BINDER_COPY_RECIPE( "ACT_BINDER_COPY_RECIPE" );
+            return ACT_BINDER_COPY_RECIPE;
         }
 
         bool can_resume_with_internal( const activity_actor &other, const Character & ) const override {
             const bookbinder_copy_activity_actor &act = static_cast<const bookbinder_copy_activity_actor &>
                     ( other );
             return rec_id == act.rec_id && book_binder == act.book_binder;
+        }
+
+        static int pages_for_recipe( const recipe &r ) {
+            return 1 + r.difficulty / 2;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -263,6 +309,46 @@ class bookbinder_copy_activity_actor: public activity_actor
         static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
 };
 
+class data_handling_activity_actor: public activity_actor
+{
+    public:
+        explicit data_handling_activity_actor() = default;
+        explicit data_handling_activity_actor( const item_location &, const std::vector<item_location> & );
+
+        const activity_id &get_type() const override {
+            static const activity_id ACT_DATA_HANDLING( "ACT_DATA_HANDLING" );
+            return ACT_DATA_HANDLING;
+        }
+
+        bool can_resume_with_internal( const activity_actor &, const Character & ) const override {
+            return false;
+        }
+
+        void start( player_activity &, Character & ) override;
+        void do_turn( player_activity &, Character & ) override;
+        void finish( player_activity &, Character & ) override;
+        void canceled( player_activity &, Character & ) override;
+
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<data_handling_activity_actor>( *this );
+        }
+
+        void serialize( JsonOut & ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue & );
+    private:
+        static constexpr time_duration time_per_card = 1_minutes;
+        item_location recorder;
+        std::vector<item_location> targets;
+        time_duration time_until_next_card = 0_seconds;
+        int handled_cards = 0;
+        int encrypted_cards = 0;
+        int downloaded_photos = 0;
+        int downloaded_songs = 0;
+        std::vector<recipe_id> downloaded_recipes;
+        int downloaded_extended_photos = 0;
+        int downloaded_monster_photos = 0;
+};
+
 class hotwire_car_activity_actor : public activity_actor
 {
     private:
@@ -272,7 +358,7 @@ class hotwire_car_activity_actor : public activity_actor
          * Position of first vehicle part; used to identify the vehicle
          * TODO: find something more reliable (to cover cases when vehicle is moved/damaged)
          */
-        tripoint target;
+        tripoint_abs_ms target;
 
         bool can_resume_with_internal( const activity_actor &other, const Character & ) const override {
             const hotwire_car_activity_actor &a = static_cast<const hotwire_car_activity_actor &>( other );
@@ -280,11 +366,13 @@ class hotwire_car_activity_actor : public activity_actor
         }
 
     public:
-        hotwire_car_activity_actor( int moves_total, const tripoint &target ): moves_total( moves_total ),
+        hotwire_car_activity_actor( int moves_total,
+                                    const tripoint_abs_ms &target ): moves_total( moves_total ),
             target( target ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_HOTWIRE_CAR" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_HOTWIRE_CAR( "ACT_HOTWIRE_CAR" );
+            return ACT_HOTWIRE_CAR;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -293,6 +381,35 @@ class hotwire_car_activity_actor : public activity_actor
 
         std::unique_ptr<activity_actor> clone() const override {
             return std::make_unique<hotwire_car_activity_actor>( *this );
+        }
+
+        void serialize( JsonOut &jsout ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
+};
+
+class glide_activity_actor : public activity_actor
+{
+    private:
+        int jump_direction;
+        int glide_distance;
+        int moved_tiles = 0;
+        int moves_total = to_moves<int>( 1_seconds );
+        explicit glide_activity_actor() = default;
+
+    public:
+        explicit glide_activity_actor( Character *you, int jump_direction, int glide_distance );
+
+        const activity_id &get_type() const override {
+            static const activity_id ACT_GLIDE( "ACT_GLIDE" );
+            return ACT_GLIDE;
+        }
+
+        void start( player_activity &act, Character & ) override;
+        void do_turn( player_activity &act, Character &you ) override;
+        void finish( player_activity &act, Character &you ) override;
+
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<glide_activity_actor>( *this );
         }
 
         void serialize( JsonOut &jsout ) const override;
@@ -312,8 +429,9 @@ class bikerack_racking_activity_actor : public activity_actor
         explicit bikerack_racking_activity_actor( const vehicle &parent_vehicle,
                 const vehicle &racked_vehicle, const std::vector<int> &racks );
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_BIKERACK_RACKING" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_BIKERACK_RACKING( "ACT_BIKERACK_RACKING" );
+            return ACT_BIKERACK_RACKING;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -341,8 +459,9 @@ class bikerack_unracking_activity_actor : public activity_actor
         explicit bikerack_unracking_activity_actor( const vehicle &parent_vehicle,
                 const std::vector<int> &parts, const std::vector<int> &racks );
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_BIKERACK_UNRACKING" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_BIKERACK_UNRACKING( "ACT_BIKERACK_UNRACKING" );
+            return ACT_BIKERACK_UNRACKING;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -365,13 +484,14 @@ class read_activity_actor : public activity_actor
         read_activity_actor() = default;
 
         explicit read_activity_actor(
-            int moves, item_location &book, item_location &ereader,
+            time_duration read_time, item_location &book, item_location &ereader,
             bool continuous = false, int learner_id = -1 )
-            : moves_total( moves ), book( book ), ereader( ereader ),
+            : moves_total( to_moves<int>( read_time ) ), book( book ), ereader( ereader ),
               continuous( continuous ), learner_id( learner_id ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_READ" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_READ( "ACT_READ" );
+            return ACT_READ;
         }
 
         static void read_book( Character &learner, const cata::value_ptr<islot_book> &islotbook,
@@ -393,7 +513,7 @@ class read_activity_actor : public activity_actor
     private:
         int moves_total;
         item_location book;
-        cata::optional<book_type> bktype; // NOLINT(cata-serialize)
+        std::optional<book_type> bktype; // NOLINT(cata-serialize)
 
         // Using an electronic book reader
         item_location ereader;
@@ -418,17 +538,20 @@ class move_items_activity_actor : public activity_actor
         std::vector<item_location> target_items;
         std::vector<int> quantities;
         bool to_vehicle;
-        tripoint relative_destination;
+        tripoint_rel_ms relative_destination;
+        bool hauling_mode;
 
     public:
         move_items_activity_actor( std::vector<item_location> target_items, std::vector<int> quantities,
-                                   bool to_vehicle, tripoint relative_destination ) :
+                                   bool to_vehicle, tripoint_rel_ms relative_destination, bool hauling_mode = false ) :
             target_items( std::move( target_items ) ), quantities( std::move( quantities ) ),
             to_vehicle( to_vehicle ),
-            relative_destination( relative_destination ) {}
+            relative_destination( relative_destination ),
+            hauling_mode( hauling_mode ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_MOVE_ITEMS" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_MOVE_ITEMS( "ACT_MOVE_ITEMS" );
+            return ACT_MOVE_ITEMS;
         }
 
         void start( player_activity &, Character & ) override {}
@@ -453,6 +576,7 @@ class pickup_activity_actor : public activity_actor
         /** Target items and the quantities thereof */
         std::vector<item_location> target_items;
         std::vector<int> quantities;
+        Pickup::pick_info info;
 
         /**
          * Position of the character when the activity is started. This is
@@ -460,12 +584,12 @@ class pickup_activity_actor : public activity_actor
          * (e.g. if the player is in a moving vehicle). This should be null
          * if not grabbing from the ground.
          */
-        cata::optional<tripoint> starting_pos;
+        std::optional<tripoint_bub_ms> starting_pos;
 
     public:
         pickup_activity_actor( const std::vector<item_location> &target_items,
                                const std::vector<int> &quantities,
-                               const cata::optional<tripoint> &starting_pos,
+                               const std::optional<tripoint_bub_ms> &starting_pos,
                                bool autopickup ) : target_items( target_items ),
             quantities( quantities ), starting_pos( starting_pos ), stash_successful( true ),
             autopickup( autopickup ) {}
@@ -477,8 +601,9 @@ class pickup_activity_actor : public activity_actor
         bool stash_successful;
         bool autopickup;
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_PICKUP" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_PICKUP( "ACT_PICKUP" );
+            return ACT_PICKUP;
         }
 
         void start( player_activity &, Character & ) override {}
@@ -504,11 +629,12 @@ class pickup_activity_actor : public activity_actor
 class boltcutting_activity_actor : public activity_actor
 {
     public:
-        explicit boltcutting_activity_actor( const tripoint &target,
+        explicit boltcutting_activity_actor( const tripoint_bub_ms &target,
                                              const item_location &tool ) : target( target ), tool( tool ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_BOLTCUTTING" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_BOLTCUTTING( "ACT_BOLTCUTTING" );
+            return ACT_BOLTCUTTING;
         }
 
         void start( player_activity &act, Character &/*who*/ ) override;
@@ -526,7 +652,7 @@ class boltcutting_activity_actor : public activity_actor
         bool testing = false; // NOLINT(cata-serialize)
 
     private:
-        tripoint target;
+        tripoint_bub_ms target;
         item_location tool;
 
         bool can_resume_with_internal( const activity_actor &other,
@@ -541,40 +667,41 @@ class lockpick_activity_actor : public activity_actor
 {
     private:
         int moves_total;
-        cata::optional<item_location> lockpick;
-        cata::optional<item> fake_lockpick;
-        tripoint target;
+        std::optional<item_location> lockpick;
+        std::optional<item> fake_lockpick;
+        tripoint_abs_ms target;
 
         lockpick_activity_actor(
             int moves_total,
-            const cata::optional<item_location> &lockpick,
-            const cata::optional<item> &fake_lockpick,
-            const tripoint &target
+            const std::optional<item_location> &lockpick,
+            const std::optional<item> &fake_lockpick,
+            const tripoint_abs_ms &target
         ) : moves_total( moves_total ), lockpick( lockpick ), fake_lockpick( fake_lockpick ),
             target( target ) {}
 
     public:
-        /** Use regular lockpick. 'target' is in global coords */
+        /** Use regular lockpick. */
         static lockpick_activity_actor use_item(
             int moves_total,
             const item_location &lockpick,
-            const tripoint &target
+            const tripoint_abs_ms &target
         );
 
-        /** Use bionic lockpick. 'target' is in global coords */
+        /** Use bionic lockpick. */
         static lockpick_activity_actor use_bionic(
-            const tripoint &target
+            const tripoint_abs_ms &target
         );
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_LOCKPICK" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_LOCKPICK( "ACT_LOCKPICK" );
+            return ACT_LOCKPICK;
         }
 
         void start( player_activity &act, Character & ) override;
         void do_turn( player_activity &, Character & ) override {}
         void finish( player_activity &act, Character &who ) override;
 
-        static cata::optional<tripoint> select_location( avatar &you );
+        static std::optional<tripoint_bub_ms> select_location( avatar &you );
 
         std::unique_ptr<activity_actor> clone() const override {
             return std::make_unique<lockpick_activity_actor>( *this );
@@ -587,21 +714,28 @@ class lockpick_activity_actor : public activity_actor
 class ebooksave_activity_actor : public activity_actor
 {
     public:
-        explicit ebooksave_activity_actor( const item_location &book, const item_location &ereader ) :
-            book( book ), ereader( ereader ) {};
+        explicit ebooksave_activity_actor( const std::vector<item_location> &books,
+                                           const item_location &ereader ) :
+            books( books ), ereader( ereader ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_EBOOKSAVE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_EBOOKSAVE( "ACT_EBOOKSAVE" );
+            return ACT_EBOOKSAVE;
         }
 
         static int pages_in_book( const itype_id &book ) {
             // an A4 sheet weights roughly 5 grams
-            return units::to_gram( book->weight ) / 5;
+            return std::max( 1, static_cast<int>( units::to_gram( book->weight ) / 5 ) );
         };
+        static int total_pages( const std::vector<item_location> &books );
+        static time_duration required_time( const std::vector<item_location> &books );
+        static int required_charges( const std::vector<item_location> &books,
+                                     const item_location &ereader );
 
         void start( player_activity &act, Character &/*who*/ ) override;
-        void do_turn( player_activity &/*act*/, Character &who ) override;
+        void do_turn( player_activity &act, Character &who ) override;
         void finish( player_activity &act, Character &who ) override;
+        void canceled( player_activity &act, Character &who ) override;
 
         std::unique_ptr<activity_actor> clone() const override {
             return std::make_unique<ebooksave_activity_actor>( *this );
@@ -611,16 +745,23 @@ class ebooksave_activity_actor : public activity_actor
         static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
 
     private:
-        item_location book;
+        /**
+         * All remaining books left to scan.
+         * After a book is fully scanned to ereader, this list is modified so that the scanned book is removed from here.
+        */
+        std::vector<item_location> books;
         item_location ereader;
-        static constexpr time_duration time_per_page = 5_seconds;
+        /** How many books this activity has scanned to ereader so far. */
+        int handled_books = 0;
+        /** How much time is left on this book until it is fully scanned and we can move on to the next book. */
+        int turns_left_on_current_book = 0;
 
-        bool can_resume_with_internal( const activity_actor &other,
-                                       const Character &/*who*/ ) const override {
-            const ebooksave_activity_actor &actor = static_cast<const ebooksave_activity_actor &>
-                                                    ( other );
-            return actor.book == book && actor.ereader == ereader;
-        }
+        static constexpr time_duration time_per_page = 5_seconds;
+        // Every 25 pages requires one charge of the ereader
+        static constexpr int pages_per_charge = 25;
+
+        void start_scanning_next_book( player_activity &act );
+        void completed_scanning_current_book( player_activity &act, Character &who );
 };
 
 class migration_cancel_activity_actor : public activity_actor
@@ -628,8 +769,9 @@ class migration_cancel_activity_actor : public activity_actor
     public:
         migration_cancel_activity_actor() = default;
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_MIGRATION_CANCEL" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_MIGRATION_CANCEL( "ACT_MIGRATION_CANCEL" );
+            return ACT_MIGRATION_CANCEL;
         }
 
         void start( player_activity &, Character & ) override {}
@@ -652,7 +794,7 @@ class open_gate_activity_actor : public activity_actor
 {
     private:
         int moves_total;
-        tripoint placement;
+        tripoint_bub_ms placement;
 
         /**
          * @pre @p other is a open_gate_activity_actor
@@ -663,11 +805,12 @@ class open_gate_activity_actor : public activity_actor
         }
 
     public:
-        open_gate_activity_actor( int gate_moves, const tripoint &gate_placement ) :
+        open_gate_activity_actor( int gate_moves, const tripoint_bub_ms &gate_placement ) :
             moves_total( gate_moves ), placement( gate_placement ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_OPEN_GATE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_OPEN_GATE( "ACT_OPEN_GATE" );
+            return ACT_OPEN_GATE;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -712,13 +855,14 @@ class consume_activity_actor : public activity_actor
             type( type ) {}
 
         explicit consume_activity_actor( const item_location &consume_location ) :
-            consume_location( consume_location ), consume_menu_selections( std::vector<int>() ) {}
+            consume_location( consume_location ) {}
 
         explicit consume_activity_actor( const item &consume_item ) :
-            consume_item( consume_item ), consume_menu_selections( std::vector<int>() ) {}
+            consume_item( consume_item ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_CONSUME" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_CONSUME( "ACT_CONSUME" );
+            return ACT_CONSUME;
         }
 
         void start( player_activity &act, Character &guy ) override;
@@ -746,8 +890,9 @@ class try_sleep_activity_actor : public activity_actor
          */
         explicit try_sleep_activity_actor( const time_duration &dur ) : duration( dur ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_TRY_SLEEP" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_TRY_SLEEP( "ACT_TRY_SLEEP" );
+            return ACT_TRY_SLEEP;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -772,10 +917,11 @@ class try_sleep_activity_actor : public activity_actor
 class safecracking_activity_actor : public activity_actor
 {
     public:
-        explicit safecracking_activity_actor( const tripoint &safe ) : safe( safe ) {};
+        explicit safecracking_activity_actor( const tripoint_bub_ms &safe ) : safe( safe ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_CRACKING" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_CRACKING( "ACT_CRACKING" );
+            return ACT_CRACKING;
         }
 
         static time_duration safecracking_time( const Character &who );
@@ -792,7 +938,7 @@ class safecracking_activity_actor : public activity_actor
         static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
 
     private:
-        tripoint safe;
+        tripoint_bub_ms safe;
         int exp_step = 0;
 
         bool can_resume_with_internal( const activity_actor &other,
@@ -811,8 +957,9 @@ class unload_activity_actor : public activity_actor
     public:
         unload_activity_actor( int moves_total, const item_location &target ) :
             moves_total( moves_total ), target( target ) {}
-        activity_id get_type() const override {
-            return activity_id( "ACT_UNLOAD" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_UNLOAD( "ACT_UNLOAD" );
+            return ACT_UNLOAD;
         }
 
         bool can_resume_with_internal( const activity_actor &other, const Character & ) const override {
@@ -844,18 +991,20 @@ class craft_activity_actor : public activity_actor
         bool is_long;
 
         float activity_override = NO_EXERCISE;
-        cata::optional<requirement_data> cached_continuation_requirements; // NOLINT(cata-serialize)
+        std::optional<requirement_data> cached_continuation_requirements; // NOLINT(cata-serialize)
         float cached_crafting_speed; // NOLINT(cata-serialize)
         int cached_assistants; // NOLINT(cata-serialize)
         double cached_base_total_moves; // NOLINT(cata-serialize)
         double cached_cur_total_moves; // NOLINT(cata-serialize)
-
+        float cached_workbench_multiplier; // NOLINT(cata-serialize)
+        bool use_cached_workbench_multiplier; // NOLINT(cata-serialize)
         bool check_if_craft_okay( item_location &craft_item, Character &crafter );
     public:
         craft_activity_actor( item_location &it, bool is_long );
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_CRAFT" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_CRAFT( "ACT_CRAFT" );
+            return ACT_CRAFT;
         }
 
         void start( player_activity &act, Character &crafter ) override;
@@ -881,17 +1030,17 @@ class workout_activity_actor : public activity_actor
         bool disable_query = false; // disables query, continue as long as possible
         bool rest_mode = false; // work or rest during training session
         time_duration duration;
-        tripoint location;
+        tripoint_bub_ms location;
         time_point stop_time; // can resume if time apart is not above
         activity_id act_id = activity_id( "ACT_WORKOUT_LIGHT" ); // variable activities
         int intensity_modifier = 1;
         int elapsed = 0;
 
     public:
-        explicit workout_activity_actor( const tripoint &loc ) : location( loc ) {}
+        explicit workout_activity_actor( const tripoint_bub_ms &loc ) : location( loc ) {}
 
         // can assume different sub-activities
-        activity_id get_type() const override {
+        const activity_id &get_type() const override {
             return act_id;
         }
 
@@ -942,11 +1091,10 @@ class drop_or_stash_item_info
         int _count = 0;
 };
 
-
 /**
  * Activity to drop items to the ground or into a vehicle cargo part.
  * @items is the list of items to drop
- * @placement is the offset to the current position of the actor (use tripoint_zero for current pos)
+ * @placement is the offset to the current position of the actor (use tripoint::zero for current pos)
  * @force_ground should the items be forced to the ground instead of e.g. a container at the position
  */
 class drop_activity_actor : public activity_actor
@@ -954,11 +1102,12 @@ class drop_activity_actor : public activity_actor
     public:
         drop_activity_actor() = default;
         drop_activity_actor( const std::vector<drop_or_stash_item_info> &items,
-                             const tripoint &placement, const bool force_ground )
+                             const tripoint_rel_ms &placement, const bool force_ground )
             : items( items ), placement( placement ), force_ground( force_ground ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_DROP" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_DROP( "ACT_DROP" );
+            return ACT_DROP;
         }
 
         void start( player_activity &/*act*/, Character &/*who*/ ) override {}
@@ -980,8 +1129,9 @@ class drop_activity_actor : public activity_actor
     private:
         std::vector<drop_or_stash_item_info> items;
         contents_change_handler handler;
-        tripoint placement;
+        tripoint_rel_ms placement;
         bool force_ground = false;
+        bool current_bulk_unload = false;
 };
 
 class stash_activity_actor: public activity_actor
@@ -989,11 +1139,12 @@ class stash_activity_actor: public activity_actor
     public:
         stash_activity_actor() = default;
         stash_activity_actor( const std::vector<drop_or_stash_item_info> &items,
-                              const tripoint &placement )
+                              const tripoint_rel_ms &placement )
             : items( items ), placement( placement ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_STASH" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_STASH( "ACT_STASH" );
+            return ACT_STASH;
         }
 
         void start( player_activity &/*act*/, Character &/*who*/ ) override {}
@@ -1015,18 +1166,20 @@ class stash_activity_actor: public activity_actor
     private:
         std::vector<drop_or_stash_item_info> items;
         contents_change_handler handler;
-        tripoint placement;
+        tripoint_rel_ms placement;
+        bool current_bulk_unload = false;
 };
 
 class harvest_activity_actor : public activity_actor
 {
     public:
-        explicit harvest_activity_actor( const tripoint &target,
+        explicit harvest_activity_actor( const tripoint_bub_ms &target,
                                          bool auto_forage = false ) :
             target( target ), auto_forage( auto_forage ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_HARVEST" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_HARVEST( "ACT_HARVEST" );
+            return ACT_HARVEST;
         }
 
         void start( player_activity &/*act*/, Character &/*who*/ ) override;
@@ -1041,7 +1194,7 @@ class harvest_activity_actor : public activity_actor
         static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
 
     private:
-        tripoint target;
+        tripoint_bub_ms target;
         bool exam_furn = false;
         bool nectar = false;
         bool auto_forage = false;
@@ -1060,8 +1213,9 @@ class reload_activity_actor : public activity_actor
     public:
         explicit reload_activity_actor( item::reload_option &&opt, int extra_moves = 0 );
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_RELOAD" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_RELOAD( "ACT_RELOAD" );
+            return ACT_RELOAD;
         }
 
         void start( player_activity &/*act*/, Character &/*who*/ ) override;
@@ -1092,16 +1246,17 @@ class milk_activity_actor : public activity_actor
 {
     public:
         milk_activity_actor() = default;
-        milk_activity_actor( int moves, std::vector<tripoint> coords,
+        milk_activity_actor( int moves, std::vector<tripoint_abs_ms> coords,
                              std::vector<std::string> str_values ) : total_moves( moves ), monster_coords( std::move( coords ) ),
             string_values( std::move( str_values ) ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_MILK" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_MILK( "ACT_MILK" );
+            return ACT_MILK;
         }
 
         void start( player_activity &act, Character &/*who*/ ) override;
-        void do_turn( player_activity &/*act*/, Character &/*who*/ ) override {}
+        void do_turn( player_activity &/*act*/, Character &/*who*/ ) override;
         void finish( player_activity &act, Character &who ) override;
         void canceled( player_activity &/*act*/, Character &/*who*/ ) override {}
 
@@ -1114,23 +1269,24 @@ class milk_activity_actor : public activity_actor
 
     private:
         int total_moves {};
-        std::vector<tripoint> monster_coords {};
+        std::vector<tripoint_abs_ms> monster_coords {};
         std::vector<std::string> string_values {};
 };
 
 class shearing_activity_actor : public activity_actor
 {
     private:
-        tripoint mon_coords;    // monster is tied for the duration
+        tripoint_bub_ms mon_coords;    // monster is tied for the duration
         bool shearing_tie;      // was the monster tied due to shearing
 
     public:
         explicit shearing_activity_actor(
-            const tripoint &mon_coords, bool shearing_tie = true )
+            const tripoint_bub_ms &mon_coords, bool shearing_tie = true )
             : mon_coords( mon_coords ), shearing_tie( shearing_tie ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_SHEARING" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_SHEARING( "ACT_SHEARING" );
+            return ACT_SHEARING;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1158,14 +1314,16 @@ class disassemble_activity_actor : public activity_actor
     private:
         int moves_total;
         float activity_override = NO_EXERCISE; // NOLINT(cata-serialize)
-
+        float cached_workbench_multiplier; // NOLINT(cata-serialize)
+        bool use_cached_workbench_multiplier = false; // NOLINT(cata-serialize)
     public:
         item_location target;
 
         explicit disassemble_activity_actor( int moves_total ) :
             moves_total( moves_total ) {}
-        activity_id get_type() const override {
-            return activity_id( "ACT_DISASSEMBLE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_DISASSEMBLE( "ACT_DISASSEMBLE" );
+            return ACT_DISASSEMBLE;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -1188,14 +1346,15 @@ class disassemble_activity_actor : public activity_actor
 class move_furniture_activity_actor : public activity_actor
 {
     private:
-        tripoint dp;
+        tripoint_rel_ms dp;
         bool via_ramp;
 
     public:
-        move_furniture_activity_actor( const tripoint &dp, bool via_ramp ) :
+        move_furniture_activity_actor( const tripoint_rel_ms &dp, bool via_ramp ) :
             dp( dp ), via_ramp( via_ramp ) {}
-        activity_id get_type() const override {
-            return activity_id( "ACT_FURNITURE_MOVE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_FURNITURE_MOVE( "ACT_FURNITURE_MOVE" );
+            return ACT_FURNITURE_MOVE;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -1218,15 +1377,18 @@ class insert_item_activity_actor : public activity_actor
         drop_locations items;
         contents_change_handler handler;
         bool all_pockets_rigid;
+        bool reopen_menu;
 
     public:
 
         insert_item_activity_actor() = default;
-        insert_item_activity_actor( const item_location &holster, const drop_locations &holstered_list ) :
-            holster( holster ), items( holstered_list ) {}
+        insert_item_activity_actor( const item_location &holster, const drop_locations &holstered_list,
+                                    bool reopen_menu = false ) : holster( holster ), items( holstered_list ),
+            reopen_menu( reopen_menu ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_INSERT_ITEM" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_INSERT_ITEM( "ACT_INSERT_ITEM" );
+            return ACT_INSERT_ITEM;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1246,23 +1408,24 @@ class tent_placement_activity_actor : public activity_actor
 {
     private:
         int moves_total;
-        tripoint target;
+        tripoint_rel_ms target;
         int radius = 1;
         item it;
         string_id<furn_t> wall;
         string_id<furn_t> floor;
-        cata::optional<string_id<furn_t>> floor_center;
+        std::optional<string_id<furn_t>> floor_center;
         string_id<furn_t> door_closed;
 
     public:
-        tent_placement_activity_actor( int moves_total, tripoint target, int radius, const item &it,
-                                       string_id<furn_t> wall, string_id<furn_t> floor, cata::optional<string_id<furn_t>> floor_center,
+        tent_placement_activity_actor( int moves_total, tripoint_rel_ms target, int radius, const item &it,
+                                       string_id<furn_t> wall, string_id<furn_t> floor, std::optional<string_id<furn_t>> floor_center,
                                        string_id<furn_t> door_closed ) : moves_total( moves_total ), target( target ), radius( radius ),
-            it( it ), wall( wall ), floor( floor ), floor_center( std::move( floor_center ) ),
+            it( it ), wall( wall ), floor( floor ), floor_center( floor_center ),
             door_closed( door_closed ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_TENT_PLACE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_TENT_PLACE( "ACT_TENT_PLACE" );
+            return ACT_TENT_PLACE;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -1281,11 +1444,12 @@ class tent_placement_activity_actor : public activity_actor
 class oxytorch_activity_actor : public activity_actor
 {
     public:
-        explicit oxytorch_activity_actor( const tripoint &target,
+        explicit oxytorch_activity_actor( const tripoint_bub_ms &target,
                                           const item_location &tool ) : target( target ), tool( tool ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_OXYTORCH" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_OXYTORCH( "ACT_OXYTORCH" );
+            return ACT_OXYTORCH;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1302,7 +1466,7 @@ class oxytorch_activity_actor : public activity_actor
         // debugmsg causes a backtrace when fired during cata_test
         bool testing = false;  // NOLINT(cata-serialize)
     private:
-        tripoint target;
+        tripoint_bub_ms target;
         item_location tool;
 
         bool can_resume_with_internal( const activity_actor &other,
@@ -1313,12 +1477,40 @@ class oxytorch_activity_actor : public activity_actor
         }
 };
 
+class outfit_swap_actor : public activity_actor
+{
+    public:
+        explicit outfit_swap_actor( const item_location &outfit_item ) : outfit_item( outfit_item ) {};
+        const activity_id &get_type() const override {
+            static const activity_id ACT_OUTFIT_SWAP( "ACT_OUTFIT_SWAP" );
+            return ACT_OUTFIT_SWAP;
+        }
+
+        void start( player_activity &act, Character &who ) override;
+        void do_turn( player_activity &, Character & ) override {}
+        void finish( player_activity &act, Character &who ) override;
+
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<outfit_swap_actor>( *this );
+        }
+
+        void serialize( JsonOut & ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue & );
+    private:
+        item_location outfit_item;
+
+        bool can_resume_with_internal( const activity_actor &, const Character & ) const override {
+            return false;
+        }
+};
+
 class meditate_activity_actor : public activity_actor
 {
     public:
         meditate_activity_actor() = default;
-        activity_id get_type() const override {
-            return activity_id( "ACT_MEDITATE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_MEDITATE( "ACT_MEDITATE" );
+            return ACT_MEDITATE;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -1344,8 +1536,9 @@ class play_with_pet_activity_actor : public activity_actor
             pet_name( pet_name ) {};
         explicit play_with_pet_activity_actor( const std::string &pet_name, const std::string &playstr ) :
             pet_name( pet_name ), playstr( playstr ) {};
-        activity_id get_type() const override {
-            return activity_id( "ACT_PLAY_WITH_PET" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_PLAY_WITH_PET( "ACT_PLAY_WITH_PET" );
+            return ACT_PLAY_WITH_PET;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -1363,11 +1556,12 @@ class play_with_pet_activity_actor : public activity_actor
 class prying_activity_actor : public activity_actor
 {
     public:
-        explicit prying_activity_actor( const tripoint &target,
+        explicit prying_activity_actor( const tripoint_bub_ms &target,
                                         const item_location &tool ) : target( target ), tool( tool ) {};
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_PRYING" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_PRYING( "ACT_PRYING" );
+            return ACT_PRYING;
         }
 
         static time_duration prying_time( const activity_data_common &data, const item_location &tool,
@@ -1387,7 +1581,7 @@ class prying_activity_actor : public activity_actor
         // debugmsg causes a backtrace when fired during cata_test
         bool testing = false;  // NOLINT(cata-serialize)
     private:
-        tripoint target;
+        tripoint_bub_ms target;
         item_location tool;
         bool prying_nails = false;
 
@@ -1409,15 +1603,16 @@ class tent_deconstruct_activity_actor : public activity_actor
     private:
         int moves_total;
         int radius;
-        tripoint target;
+        tripoint_bub_ms target;
         itype_id tent;
 
     public:
-        tent_deconstruct_activity_actor( int moves_total, int radius, tripoint target,
+        tent_deconstruct_activity_actor( int moves_total, int radius, tripoint_bub_ms target,
                                          itype_id tent ) : moves_total( moves_total ), radius( radius ), target( target ), tent( tent ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_TENT_DECONSTRUCT" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_TENT_DECONSTRUCT( "ACT_TENT_DECONSTRUCT" );
+            return ACT_TENT_DECONSTRUCT;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -1432,12 +1627,45 @@ class tent_deconstruct_activity_actor : public activity_actor
         static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
 };
 
+class reel_cable_activity_actor : public activity_actor
+{
+    private:
+        int moves_total;
+        item_location cable;
+    public:
+        reel_cable_activity_actor( int moves_total, const item_location &cable ) :
+            moves_total( moves_total ), cable( cable ) {}
+        const activity_id &get_type() const override {
+            static const activity_id ACT_REEL_CABLE( "ACT_REEL_CABLE" );
+            return ACT_REEL_CABLE;
+        }
+
+        bool can_resume_with_internal( const activity_actor &other,
+                                       const Character &/*who*/ ) const override {
+            const reel_cable_activity_actor &actor = static_cast<const reel_cable_activity_actor &>
+                    ( other );
+            return actor.cable == cable;
+        }
+
+        void start( player_activity &act, Character & ) override;
+        void do_turn( player_activity &, Character & ) override {}
+        void finish( player_activity &act, Character &who ) override;
+
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<reel_cable_activity_actor>( *this );
+        }
+
+        void serialize( JsonOut &jsout ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
+};
+
 class shave_activity_actor : public activity_actor
 {
     public:
         shave_activity_actor() = default;
-        activity_id get_type() const override {
-            return activity_id( "ACT_SHAVE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_SHAVE( "ACT_SHAVE" );
+            return ACT_SHAVE;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -1456,8 +1684,9 @@ class haircut_activity_actor : public activity_actor
 {
     public:
         haircut_activity_actor() = default;
-        activity_id get_type() const override {
-            return activity_id( "ACT_HAIRCUT" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_HAIRCUT( "ACT_HAIRCUT" );
+            return ACT_HAIRCUT;
         }
 
         void start( player_activity &act, Character & ) override;
@@ -1489,8 +1718,9 @@ class vehicle_folding_activity_actor : public activity_actor
     public:
         explicit vehicle_folding_activity_actor( const vehicle &target );
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_VEHICLE_FOLD" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_VEHICLE_FOLD( "ACT_VEHICLE_FOLD" );
+            return ACT_VEHICLE_FOLD;
         }
 
         void start( player_activity &act, Character &p ) override;
@@ -1522,8 +1752,9 @@ class vehicle_unfolding_activity_actor : public activity_actor
     public:
         explicit vehicle_unfolding_activity_actor( const item &it );
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_VEHICLE_UNFOLD" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_VEHICLE_UNFOLD( "ACT_VEHICLE_UNFOLD" );
+            return ACT_VEHICLE_UNFOLD;
         }
 
         void start( player_activity &act, Character &p ) override;
@@ -1539,14 +1770,79 @@ class vehicle_unfolding_activity_actor : public activity_actor
         static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
 };
 
+class wash_activity_actor : public activity_actor
+{
+    private:
+        wash_activity_actor() = default;
+    public:
+        wash_activity_actor( drop_locations to_wash,
+                             washing_requirements &requirements ) :
+            to_wash( std::move( to_wash ) ),
+            requirements( requirements ) {};
+
+        const activity_id &get_type() const override {
+            static const activity_id ACT_WASH( "ACT_WASH" );
+            return ACT_WASH;
+        }
+
+        void start( player_activity &act, Character & ) override;
+        void do_turn( player_activity &, Character & ) override {};
+        void finish( player_activity &act, Character &p ) override;
+
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<wash_activity_actor>( *this );
+        }
+
+        void serialize( JsonOut &jsout ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
+
+    private:
+        drop_locations to_wash;
+        washing_requirements requirements;
+};
+
+class heat_activity_actor : public activity_actor
+{
+    private:
+        heat_activity_actor() = default;
+        int get_available_heater( Character &p, item_location &loc ) const;
+    public:
+        heat_activity_actor( drop_locations to_heat,
+                             heating_requirements &requirements,
+                             heater h ) :
+            to_heat( std::move( to_heat ) ), requirements( requirements ), h( std::move( h ) ) {};
+
+        const activity_id &get_type() const override {
+            static const activity_id ACT_HEATING( "ACT_HEATING" );
+            return ACT_HEATING;
+        }
+
+        void start( player_activity &act, Character & ) override;
+        void do_turn( player_activity &act, Character &p ) override;
+        void finish( player_activity &act, Character &p ) override;
+
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<heat_activity_actor>( *this );
+        }
+
+        void serialize( JsonOut &jsout ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
+
+    private:
+        drop_locations to_heat;
+        heating_requirements requirements;
+        heater h;
+};
+
 class wear_activity_actor : public activity_actor
 {
     public:
         wear_activity_actor( std::vector<item_location> target_items, std::vector<int> quantities ) :
             target_items( std::move( target_items ) ),
             quantities( std::move( quantities ) ) {};
-        activity_id get_type() const override {
-            return activity_id( "ACT_WEAR" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_WEAR( "ACT_WEAR" );
+            return ACT_WEAR;
         }
 
         void start( player_activity &, Character & ) override {};
@@ -1572,8 +1868,9 @@ class wield_activity_actor : public activity_actor
         wield_activity_actor( item_location target_item, int quantity ) :
             target_item( std::move( target_item ) ),
             quantity( quantity ) {};
-        activity_id get_type() const override {
-            return activity_id( "ACT_WIELD" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_WIELD( "ACT_WIELD" );
+            return ACT_WIELD;
         }
 
         void start( player_activity &, Character & ) override {};
@@ -1593,14 +1890,15 @@ class wield_activity_actor : public activity_actor
         contents_change_handler handler;
 };
 
-class pickup_menu_activity_actor : public activity_actor
+class invoke_item_activity_actor : public activity_actor
 {
     public:
-        pickup_menu_activity_actor( cata::optional<tripoint> where,
-                                    std::vector<drop_location> selection ) : where( std::move( where ) ),
-            selection( std::move( selection ) ) {};
-        activity_id get_type() const override {
-            return activity_id( "ACT_PICKUP_MENU" );
+        invoke_item_activity_actor( item_location item, std::string method ) :
+            item( std::move( item ) ),
+            method( std::move( method ) ) {};
+        const activity_id &get_type() const override {
+            static const activity_id ACT_INVOKE_ITEM( "ACT_INVOKE_ITEM" );
+            return ACT_INVOKE_ITEM;
         }
 
         void start( player_activity &, Character & ) override {};
@@ -1608,15 +1906,15 @@ class pickup_menu_activity_actor : public activity_actor
         void finish( player_activity &, Character & ) override {};
 
         std::unique_ptr<activity_actor> clone() const override {
-            return std::make_unique<pickup_menu_activity_actor>( *this );
+            return std::make_unique<invoke_item_activity_actor>( *this );
         }
 
         void serialize( JsonOut & ) const override;
         static std::unique_ptr<activity_actor> deserialize( JsonValue & );
 
     private:
-        cata::optional<tripoint> where;
-        std::vector<drop_location> selection;
+        item_location item;
+        std::string method;
 };
 
 class chop_logs_activity_actor : public activity_actor
@@ -1625,8 +1923,9 @@ class chop_logs_activity_actor : public activity_actor
         chop_logs_activity_actor() = default;
         chop_logs_activity_actor( int moves, const item_location &tool ) : moves( moves ), tool( tool ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_CHOP_LOGS" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_CHOP_LOGS( "ACT_CHOP_LOGS" );
+            return ACT_CHOP_LOGS;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1651,8 +1950,9 @@ class chop_planks_activity_actor : public activity_actor
         chop_planks_activity_actor() = default;
         explicit chop_planks_activity_actor( int moves ) : moves( moves ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_CHOP_PLANKS" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_CHOP_PLANKS( "ACT_CHOP_PLANKS" );
+            return ACT_CHOP_PLANKS;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1676,8 +1976,9 @@ class chop_tree_activity_actor : public activity_actor
         chop_tree_activity_actor() = default;
         chop_tree_activity_actor( int moves, const item_location &tool ) : moves( moves ), tool( tool ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_CHOP_TREE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_CHOP_TREE( "ACT_CHOP_TREE" );
+            return ACT_CHOP_TREE;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1702,8 +2003,9 @@ class churn_activity_actor : public activity_actor
         churn_activity_actor() = default;
         churn_activity_actor( int moves, const item_location &tool ) : moves( moves ), tool( tool ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_CHURN" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_CHURN( "ACT_CHURN" );
+            return ACT_CHURN;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1728,8 +2030,9 @@ class clear_rubble_activity_actor : public activity_actor
         clear_rubble_activity_actor() = default;
         explicit clear_rubble_activity_actor( int moves ) : moves( moves ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_CLEAR_RUBBLE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_CLEAR_RUBBLE( "ACT_CLEAR_RUBBLE" );
+            return ACT_CLEAR_RUBBLE;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1751,11 +2054,12 @@ class disable_activity_actor : public activity_actor
 {
     public:
         disable_activity_actor() = default;
-        disable_activity_actor( const tripoint &target, int moves_total,
+        disable_activity_actor( const tripoint_bub_ms &target, int moves_total,
                                 bool reprogram ) : target( target ), moves_total( moves_total ), reprogram( reprogram ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_DISABLE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_DISABLE( "ACT_DISABLE" );
+            return ACT_DISABLE;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1775,7 +2079,7 @@ class disable_activity_actor : public activity_actor
         static int get_disable_turns();
 
     private:
-        tripoint target;
+        tripoint_bub_ms target;
         int moves_total;
         bool reprogram;
 };
@@ -1787,8 +2091,9 @@ class firstaid_activity_actor : public activity_actor
         firstaid_activity_actor( int moves, std::string name, character_id patientID ) : moves( moves ),
             name( std::move( name ) ), patientID( patientID ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_FIRSTAID" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_FIRSTAID( "ACT_FIRSTAID" );
+            return ACT_FIRSTAID;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1814,8 +2119,9 @@ class forage_activity_actor : public activity_actor
         forage_activity_actor() = default;
         explicit forage_activity_actor( int moves ) : moves( moves ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_FORAGE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_FORAGE( "ACT_FORAGE" );
+            return ACT_FORAGE;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1840,8 +2146,9 @@ class gunmod_add_activity_actor : public activity_actor
         gunmod_add_activity_actor( int moves, std::string name ) : moves( moves ),
             name( std::move( name ) ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_GUNMOD_ADD" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_GUNMOD_ADD( "ACT_GUNMOD_ADD" );
+            return ACT_GUNMOD_ADD;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1866,8 +2173,9 @@ class longsalvage_activity_actor : public activity_actor
         longsalvage_activity_actor() = default;
         explicit longsalvage_activity_actor( int index ) : index( index ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_LONGSALVAGE" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_LONGSALVAGE( "ACT_LONGSALVAGE" );
+            return ACT_LONGSALVAGE;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1891,8 +2199,9 @@ class mop_activity_actor : public activity_actor
         mop_activity_actor() = default;
         explicit mop_activity_actor( int moves ) : moves( moves ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_MOP" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_MOP( "ACT_MOP" );
+            return ACT_MOP;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1916,8 +2225,9 @@ class unload_loot_activity_actor : public activity_actor
         unload_loot_activity_actor() = default;
         explicit unload_loot_activity_actor( int moves ) : moves( moves ) {}
 
-        activity_id get_type() const override {
-            return activity_id( "ACT_UNLOAD_LOOT" );
+        const activity_id &get_type() const override {
+            static const activity_id ACT_UNLOAD_LOOT( "ACT_UNLOAD_LOOT" );
+            return ACT_UNLOAD_LOOT;
         }
 
         void start( player_activity &act, Character &who ) override;
@@ -1935,8 +2245,76 @@ class unload_loot_activity_actor : public activity_actor
         int moves;
         int num_processed;
         int stage;
-        std::unordered_set<tripoint> coord_set;
-        tripoint placement;
+        std::unordered_set<tripoint_abs_ms> coord_set;
+        tripoint_abs_ms placement;
+};
+
+class pulp_activity_actor : public activity_actor
+{
+    public:
+        pulp_activity_actor() = default;
+        explicit pulp_activity_actor( const tripoint_abs_ms placement,
+                                      const bool pulp_acid = false ) : placement( { placement } ),
+        num_corpses( 0 ), pulp_acid( pulp_acid ) {}
+        explicit pulp_activity_actor( const std::set<tripoint_abs_ms> &placement,
+                                      const bool pulp_acid = false ) : placement( placement ), num_corpses( 0 ), pulp_acid( pulp_acid ) {}
+        const activity_id &get_type() const override {
+            static const activity_id ACT_PULP( "ACT_PULP" );
+            return ACT_PULP;
+        }
+
+        void start( player_activity &act, Character &who ) override;
+        void do_turn( player_activity &act, Character &you ) override;
+        void finish( player_activity &, Character & ) override;
+
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<pulp_activity_actor>( *this );
+        }
+
+        void serialize( JsonOut &jsout ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
+
+    private:
+        bool can_resume_with_internal( const activity_actor &other,
+                                       const Character &/*who*/ ) const override {
+            const pulp_activity_actor &actor = static_cast<const pulp_activity_actor &>( other );
+            return actor.pulp_acid == pulp_acid;
+        }
+        std::set<tripoint_abs_ms> placement;
+        int num_corpses;
+        bool pulp_acid;
+};
+
+class wait_stamina_activity_actor : public activity_actor
+{
+
+    public:
+        // Wait until stamina is at the maximum.
+        wait_stamina_activity_actor() = default;
+
+        // If we're given a threshold, wait until stamina is at least this value.
+        explicit wait_stamina_activity_actor( int stamina_threshold ) : stamina_threshold(
+                stamina_threshold ) {};
+
+        void start( player_activity &act, Character &who ) override;
+        void do_turn( player_activity &act, Character &you ) override;
+        void finish( player_activity &act, Character &you ) override;
+
+        const activity_id &get_type() const override {
+            static const activity_id ACT_WAIT_STAMINA( "ACT_WAIT_STAMINA" );
+            return ACT_WAIT_STAMINA;
+        }
+
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<wait_stamina_activity_actor>( *this );
+        }
+
+        void serialize( JsonOut &jsout ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
+
+    private:
+        int stamina_threshold = -1;
+        int initial_stamina = -1;
 };
 
 #endif // CATA_SRC_ACTIVITY_ACTOR_DEFINITIONS_H

@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "debug.h"
 #include "enums.h"
 #include "filesystem.h" // IWYU pragma: keep
 #include "make_static.h"
@@ -41,8 +42,8 @@ static std::string autonote_value;
 static std::string keymap_value;
 static std::string options_value;
 static std::string memorialdir_value;
+static std::string achievementdir_value;
 static std::string langdir_value;
-
 
 static cata_path autonote_path_value;
 static cata_path autopickup_path_value;
@@ -53,22 +54,26 @@ static cata_path gfxdir_path_value;
 static cata_path keymap_path_value;
 static cata_path langdir_path_value;
 static cata_path memorialdir_path_value;
+static cata_path achievementdir_path_value;
 static cata_path motd_path_value;
 static cata_path options_path_value;
 static cata_path savedir_path_value;
 static cata_path user_dir_path_value;
 
-void PATH_INFO::init_base_path( std::string path )
+// Get the given env var, or abort the program if it is not set
+static const char *getenv_or_abort( const char *name )
 {
-    if( !path.empty() ) {
-        const char ch = path.back();
-        if( ch != '/' && ch != '\\' ) {
-            path.push_back( '/' );
-        }
+    const char *result = getenv( name );
+    if( !result ) {
+        cata_fatal( "Required environment variable %s was not set", name );
     }
+    return result;
+}
 
-    base_path_value = path;
-    base_path_path_value = cata_path{ cata_path::root_path::base, fs::path{} };
+void PATH_INFO::init_base_path( const std::string &path )
+{
+    base_path_value = as_norm_dir( path );
+    base_path_path_value = cata_path{ cata_path::root_path::base, std::filesystem::path{} };
 }
 
 void PATH_INFO::init_user_dir( std::string dir )
@@ -76,27 +81,27 @@ void PATH_INFO::init_user_dir( std::string dir )
     if( dir.empty() ) {
         const char *user_dir;
 #if defined(_WIN32)
-        user_dir = getenv( "LOCALAPPDATA" );
+        user_dir = getenv_or_abort( "LOCALAPPDATA" );
         // On Windows userdir without dot
         dir = std::string( user_dir ) + "/cataclysm-dda/";
 #elif defined(MACOSX)
-        user_dir = getenv( "HOME" );
+        user_dir = getenv_or_abort( "HOME" );
         dir = std::string( user_dir ) + "/Library/Application Support/Cataclysm/";
 #elif defined(USE_XDG_DIR)
         if( ( user_dir = getenv( "XDG_DATA_HOME" ) ) ) {
             dir = std::string( user_dir ) + "/cataclysm-dda/";
         } else {
-            user_dir = getenv( "HOME" );
+            user_dir = getenv_or_abort( "HOME" );
             dir = std::string( user_dir ) + "/.local/share/cataclysm-dda/";
         }
 #else
-        user_dir = getenv( "HOME" );
+        user_dir = getenv_or_abort( "HOME" );
         dir = std::string( user_dir ) + "/.cataclysm-dda/";
 #endif
     }
 
-    user_dir_value = dir;
-    user_dir_path_value = cata_path{ cata_path::root_path::user, fs::path{} };
+    user_dir_value = as_norm_dir( dir );
+    user_dir_path_value = cata_path{ cata_path::root_path::user, std::filesystem::path{} };
 }
 
 void PATH_INFO::set_standard_filenames()
@@ -106,7 +111,7 @@ void PATH_INFO::set_standard_filenames()
     cata_path prefix_path;
 
     // Data is always relative to itself. Also, the base path might not be writeable.
-    datadir_path_value = cata_path{ cata_path::root_path::data, fs::path{} };
+    datadir_path_value = cata_path{ cata_path::root_path::data, std::filesystem::path{} };
 
     if( !base_path_value.empty() ) {
 #if defined(DATA_DIR_PREFIX)
@@ -136,9 +141,11 @@ void PATH_INFO::set_standard_filenames()
 
     savedir_value = user_dir_value + "save/";
     // Special: savedir is always relative to itself even if in the user dir location.
-    savedir_path_value = cata_path{ cata_path::root_path::save, fs::path{} };
+    savedir_path_value = cata_path{ cata_path::root_path::save, std::filesystem::path{} };
     memorialdir_value = user_dir_value + "memorial/";
     memorialdir_path_value = user_dir_path_value / "memorial";
+    achievementdir_value = user_dir_value + "achievements/";
+    achievementdir_path_value = user_dir_path_value / "achievements";
 
 #if defined(USE_XDG_DIR)
     const char *user_dir;
@@ -146,11 +153,11 @@ void PATH_INFO::set_standard_filenames()
     if( ( user_dir = getenv( "XDG_CONFIG_HOME" ) ) ) {
         dir = std::string( user_dir ) + "/cataclysm-dda/";
     } else {
-        user_dir = getenv( "HOME" );
+        user_dir = getenv_or_abort( "HOME" );
         dir = std::string( user_dir ) + "/.config/cataclysm-dda/";
     }
     config_dir_value = dir;
-    config_dir_path_value = cata_path{ cata_path::root_path::config, fs::path{} };
+    config_dir_path_value = cata_path{ cata_path::root_path::config, std::filesystem::path{} };
 #else
     config_dir_value = user_dir_value + "config/";
     config_dir_path_value = user_dir_path_value / "config";
@@ -216,11 +223,7 @@ cata_path PATH_INFO::base_colors()
 {
     return config_dir_path_value / "base_colors.json";
 }
-std::string PATH_INFO::base_path()
-{
-    return base_path_value;
-}
-cata_path PATH_INFO::base_path_path()
+cata_path PATH_INFO::base_path()
 {
     return base_path_path_value;
 }
@@ -292,13 +295,9 @@ std::string PATH_INFO::user_font()
 {
     return user_dir_value + "font/";
 }
-std::string PATH_INFO::graveyarddir()
+cata_path PATH_INFO::graveyarddir_path()
 {
-    return user_dir_value + "graveyard/";
-}
-cata_path PATH_INFO::help()
-{
-    return datadir_path_value / "help" / "texts.json";
+    return user_dir_path_value / "graveyard";
 }
 cata_path PATH_INFO::keybindings()
 {
@@ -324,9 +323,17 @@ std::string PATH_INFO::memorialdir()
 {
     return memorialdir_value;
 }
+std::string PATH_INFO::achievementdir()
+{
+    return achievementdir_value;
+}
 cata_path PATH_INFO::memorialdir_path()
 {
     return memorialdir_path_value;
+}
+cata_path PATH_INFO::achievementdir_path()
+{
+    return achievementdir_path_value;
 }
 cata_path PATH_INFO::jsondir()
 {
@@ -343,6 +350,10 @@ cata_path PATH_INFO::options()
 cata_path PATH_INFO::panel_options()
 {
     return config_dir_path_value / "panel_options.json";
+}
+cata_path PATH_INFO::pocket_presets()
+{
+    return config_dir_path_value / "pocket_presets.json";
 }
 cata_path PATH_INFO::safemode()
 {
@@ -399,6 +410,10 @@ cata_path PATH_INFO::user_sound()
 std::string PATH_INFO::worldoptions()
 {
     return "worldoptions.json";
+}
+std::string PATH_INFO::world_timestamp()
+{
+    return "world_timestamp.json";
 }
 std::string PATH_INFO::crash()
 {
@@ -517,7 +532,7 @@ cata_path PATH_INFO::names()
 void PATH_INFO::set_datadir( const std::string &datadir )
 {
     datadir_value = datadir;
-    datadir_path_value = cata_path{ cata_path::root_path::data, fs::path{} };
+    datadir_path_value = cata_path{ cata_path::root_path::data, std::filesystem::path{} };
     // Shared dirs
     gfxdir_value = datadir_value + "gfx/";
     gfxdir_path_value = datadir_path_value / "gfx";
@@ -530,7 +545,7 @@ void PATH_INFO::set_datadir( const std::string &datadir )
 void PATH_INFO::set_config_dir( const std::string &config_dir )
 {
     config_dir_value = config_dir;
-    config_dir_path_value = cata_path{ cata_path::root_path::config, fs::path{} };
+    config_dir_path_value = cata_path{ cata_path::root_path::config, std::filesystem::path{} };
     options_value = config_dir_value + "options.json";
     options_path_value = config_dir_path_value / "options.json";
     keymap_value = config_dir_value + "keymap.txt";
@@ -542,13 +557,13 @@ void PATH_INFO::set_config_dir( const std::string &config_dir )
 void PATH_INFO::set_savedir( const std::string &savedir )
 {
     savedir_value = savedir;
-    savedir_path_value = cata_path{ cata_path::root_path::save, fs::path{} };
+    savedir_path_value = cata_path{ cata_path::root_path::save, std::filesystem::path{} };
 }
 
 void PATH_INFO::set_memorialdir( const std::string &memorialdir )
 {
     memorialdir_value = memorialdir;
-    memorialdir_path_value = cata_path{ cata_path::root_path::memorial, fs::path{} };
+    memorialdir_path_value = cata_path{ cata_path::root_path::memorial, std::filesystem::path{} };
 }
 
 void PATH_INFO::set_options( const std::string &options )
@@ -573,7 +588,7 @@ void PATH_INFO::set_motd( const std::string &motd )
     motd_value = motd;
 }
 
-fs::path cata_path::get_logical_root_path() const
+std::filesystem::path cata_path::get_logical_root_path() const
 {
     const std::string &path_value = ( []( cata_path::root_path root ) -> const std::string& {
         switch( root )
@@ -596,5 +611,5 @@ fs::path cata_path::get_logical_root_path() const
             }
         }
     } )( logical_root_ );
-    return fs::path{ path_value };
+    return std::filesystem::u8path( path_value );
 }

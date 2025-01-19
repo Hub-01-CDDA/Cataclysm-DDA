@@ -1,3 +1,5 @@
+/* Modified by the Cataclysm: Dark Days Ahead project. */
+
 /*
  * Copyright 2014 Google Inc. All rights reserved.
  *
@@ -1433,7 +1435,7 @@ class FlatBufferBuilder {
     // If you get this assert, a corresponding StartTable wasn't called.
     FLATBUFFERS_ASSERT(nested);
     // Write the vtable offset, which is the start of any Table.
-    // We fill it's value later.
+    // We fill its value later.
     auto vtableoffsetloc = PushElement<soffset_t>(0);
     // Write a vtable, which consists entirely of voffset_t elements.
     // It starts with the number of offsets, followed by a type id, followed
@@ -2199,7 +2201,7 @@ const T *GetTemporaryPointer(FlatBufferBuilder &fbb, Offset<T> offset) {
   return GetMutableTemporaryPointer<T>(fbb, offset);
 }
 
-/// @brief Get a pointer to the the file_identifier section of the buffer.
+/// @brief Get a pointer to the file_identifier section of the buffer.
 /// @return Returns a const char pointer to the start of the file_identifier
 /// characters in the buffer.  The returned char * has length
 /// 'flatbuffers::FlatBufferBuilder::kFileIdentifierLength'.

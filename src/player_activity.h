@@ -5,6 +5,7 @@
 #include <climits>
 #include <cstddef>
 #include <iosfwd>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_set>
@@ -14,11 +15,10 @@
 #include "calendar.h"
 #include "clone_ptr.h"
 #include "compatibility.h"
-#include "coordinates.h"
+#include "coords_fwd.h"
 #include "enums.h"
 #include "item_location.h"
 #include "memory_fast.h"
-#include "optional.h"
 #include "point.h"
 #include "type_id.h"
 
@@ -61,10 +61,10 @@ class player_activity
         std::vector<item_location> targets;
         std::vector<int> values;
         std::vector<std::string> str_values;
-        std::vector<tripoint> coords;
-        std::unordered_set<tripoint> coord_set;
+        std::vector<tripoint_abs_ms> coords;
+        std::unordered_set<tripoint_abs_ms> coord_set;
         std::vector<weak_ptr_fast<monster>> monsters;
-        static constexpr tripoint_abs_ms invalid_place{ tripoint_min };
+        static constexpr const tripoint_abs_ms &invalid_place = tripoint_abs_ms::invalid;
         tripoint_abs_ms placement;
         // ACT_START_ENGINES needs a relative position because the engine might
         // be in a moving vehicle at the time.
@@ -123,12 +123,12 @@ class player_activity
         const translation &get_verb() const;
 
         int get_value( size_t index, int def = 0 ) const;
-        std::string get_str_value( size_t index, const std::string &def = "" ) const;
+        std::string get_str_value( size_t index, std::string_view def = {} ) const;
 
         /**
          * Helper that returns an activity specific progress message.
          */
-        cata::optional<std::string> get_progress_message( const avatar &u ) const;
+        std::optional<std::string> get_progress_message( const avatar &u ) const;
 
         /**
          * If this returns true, the action can be continued without
@@ -136,18 +136,15 @@ class player_activity
          * possible if the player start the very same activity (with the same
          * parameters) again.
          */
-        bool is_suspendable() const;
+        bool can_resume() const;
 
         void serialize( JsonOut &json ) const;
         void deserialize( const JsonObject &data );
-        // used to migrate the item indices to item_location
-        // obsolete after 0.F stable
-        void migrate_item_position( Character &guy );
         /** Convert from the old enumeration to the new string_id */
         void deserialize_legacy_type( int legacy_type, activity_id &dest );
 
         /**
-         * Preform necessary initialization to start or resume the activity. Must be
+         * Perform necessary initialization to start or resume the activity. Must be
          * called whenever a Character starts a new activity.
          * When resuming an activity, do not call activity_actor::start
          */

@@ -1,32 +1,44 @@
-#include <algorithm> //std::min
+#include <algorithm>
 #include <cstddef>
-#include <functional>
+#include <cstdint>
+#include <list>
+#include <map>
 #include <memory>
+#include <optional>
+#include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "avatar.h"
-#include "avatar_action.h"
 #include "bionics.h"
 #include "bodypart.h"
 #include "calendar.h"
 #include "cata_utility.h"
 #include "catacharset.h"
+#include "character.h"
 #include "color.h"
 #include "cursesdef.h"
 #include "enums.h"
 #include "flat_set.h"
 #include "game.h"
-#include "game_inventory.h"
 #include "input.h"
+#include "input_context.h"
+#include "input_enums.h"
 #include "inventory.h"
+#include "item.h"
+#include "item_location.h"
 #include "localized_comparator.h"
-#include "material.h"
+#include "make_static.h"
+#include "npc.h"
 #include "options.h"
 #include "output.h"
-#include "make_static.h"
 #include "pimpl.h"
+#include "point.h"
 #include "string_formatter.h"
+#include "translation.h"
 #include "translations.h"
+#include "type_id.h"
 #include "ui.h"
 #include "ui_manager.h"
 #include "uistate.h"
@@ -34,6 +46,8 @@
 #include "vehicle.h"
 
 static const itype_id itype_battery( "battery" );
+
+static const json_character_flag json_flag_BIONIC_GUN( "BIONIC_GUN" );
 
 // '!', '-' and '=' are uses as default bindings in the menu
 static const invlet_wrapper
@@ -97,7 +111,7 @@ struct bionic_sort_less {
                     return lbd_sort_power < rbd_sort_power;
                 }
             }
-            /* fallthrough */
+            [[fallthrough]];
             case bionic_ui_sort_mode::NAME:
                 return localized_compare( lbd.name.translated(), rbd.name.translated() );
         }
@@ -258,21 +272,20 @@ static void draw_bionics_titlebar( const catacurses::window &window, avatar *p,
                                          string_format( _( "Bionic Power: <color_light_blue>%s</color>/<color_light_blue>%ikJ</color>" ),
                                                  power_string, units::to_kilojoule( p->get_max_power_level() ) ) );
 
-    mvwputch( window, point( pwr_str_pos - 1, 1 ), BORDER_COLOR, LINE_XOXO ); // |
-    mvwputch( window, point( pwr_str_pos - 1, 2 ), BORDER_COLOR, LINE_XXOO ); // |_
-    for( int i = pwr_str_pos; i < getmaxx( window ); i++ ) {
-        mvwputch( window, point( i, 2 ), BORDER_COLOR, LINE_OXOX ); // -
-    }
-    for( int i = 0; i < getmaxx( window ); i++ ) {
-        mvwputch( window, point( i, 0 ), BORDER_COLOR, LINE_OXOX ); // -
-    }
-    mvwputch( window, point( pwr_str_pos - 1, 0 ), BORDER_COLOR, LINE_OXXX ); // ^|^
+    wattron( window, BORDER_COLOR );
+    mvwaddch( window, point( pwr_str_pos - 1, 1 ), LINE_XOXO ); // |
+    mvwaddch( window, point( pwr_str_pos - 1, 2 ), LINE_XXOO ); // |_
+    mvwhline( window, point( pwr_str_pos, 2 ), LINE_OXOX, getmaxx( window ) - pwr_str_pos ); // -
+    mvwhline( window, point::zero, LINE_OXOX, getmaxx( window ) ); // -
+    mvwaddch( window, point( pwr_str_pos - 1, 0 ), LINE_OXXX ); // ^|^
+    wattroff( window, BORDER_COLOR );
     center_print( window, 0, c_light_red, _( "Bionics" ) );
 
     std::string desc_append = string_format(
                                   _( "[<color_yellow>%s</color>] Reassign, [<color_yellow>%s</color>] Switch tabs, "
-                                     "[<color_yellow>%s</color>] Toggle fuel saving mode, " ),
-                                  ctxt.get_desc( "REASSIGN" ), ctxt.get_desc( "NEXT_TAB" ), ctxt.get_desc( "TOGGLE_SAFE_FUEL" ) );
+                                     "[<color_yellow>%s</color>] Toggle fuel saving mode, [<color_yellow>%s</color>] Toggle sprite visibility, " ),
+                                  ctxt.get_desc( "REASSIGN" ), ctxt.get_desc( "NEXT_TAB" ), ctxt.get_desc( "TOGGLE_SAFE_FUEL" ),
+                                  ctxt.get_desc( "TOGGLE_SPRITE" ) );
     desc_append += string_format( _( " [<color_yellow>%s</color>] Sort: %s" ), ctxt.get_desc( "SORT" ),
                                   sort_mode_str( uistate.bionic_sort_mode ) );
     std::string desc;
@@ -301,7 +314,10 @@ static std::string build_bionic_poweronly_string( const bionic &bio, avatar *p )
     const bionic_data &bio_data = bio.id.obj();
     std::vector<std::string> properties;
 
-    if( bio_data.power_activate > 0_kJ ) {
+    if( bio_data.has_flag( json_flag_BIONIC_GUN ) && bio.get_weapon().get_gun_bionic_drain() > 0_kJ ) {
+        properties.push_back( string_format( _( "%s act" ),
+                                             units::display( bio.get_weapon().get_gun_bionic_drain() ) ) );
+    } else if( bio_data.power_activate > 0_kJ ) {
         properties.push_back( string_format( _( "%s act" ),
                                              units::display( bio_data.power_activate ) ) );
     }
@@ -324,6 +340,9 @@ static std::string build_bionic_poweronly_string( const bionic &bio, avatar *p )
     }
     if( bio.incapacitated_time > 0_turns ) {
         properties.emplace_back( _( "(incapacitated)" ) );
+    }
+    if( !bio.show_sprite ) {
+        properties.emplace_back( _( "(hidden)" ) );
     }
 
     if( bio.is_safe_fuel_on() ) {
@@ -366,16 +385,12 @@ static void draw_bionics_tabs( const catacurses::window &win, const size_t activ
     // Draw symbols to connect additional lines to border
     int width = getmaxx( win );
     int height = getmaxy( win );
-    for( int i = 0; i < height - 1; ++i ) {
-        // |
-        mvwputch( win, point( 0, i ), BORDER_COLOR, LINE_XOXO );
-        // |
-        mvwputch( win, point( width - 1, i ), BORDER_COLOR, LINE_XOXO );
-    }
-    // |-
-    mvwputch( win, point( 0, height - 1 ), BORDER_COLOR, LINE_XXXO );
-    // -|
-    mvwputch( win, point( width - 1, height - 1 ), BORDER_COLOR, LINE_XOXX );
+    wattron( win, BORDER_COLOR );
+    mvwvline( win, point::zero, LINE_XOXO, height - 1 ); // |
+    mvwvline( win, point( width - 1, 0 ), LINE_XOXO, height - 1 ); // |
+    mvwaddch( win, point( 0, height - 1 ), LINE_XXXO ); // |-
+    mvwaddch( win, point( width - 1, height - 1 ), LINE_XOXX ); // -|
+    wattroff( win, BORDER_COLOR );
 
     wnoutrefresh( win );
 }
@@ -386,7 +401,7 @@ static void draw_description( const catacurses::window &win, const bionic &bio,
     werase( win );
     const int width = getmaxx( win );
     const std::string poweronly_string = build_bionic_poweronly_string( bio, p );
-    int ypos = fold_and_print( win, point_zero, width, c_white, "%s", bio.id->name );
+    int ypos = fold_and_print( win, point::zero, width, c_white, "%s", bio.id->name );
     if( !poweronly_string.empty() ) {
         ypos += fold_and_print( win, point( 0, ypos ), width, c_light_gray,
                                 _( "Power usage: %s" ), poweronly_string );
@@ -423,9 +438,11 @@ static void draw_connectors( const catacurses::window &win, const point &start,
         return;
     }
 
+    wattron( win, BORDER_COLOR );
+
     // draw horizontal line from selected bionic
     const int turn_x = start.x + ( last_x - start.x ) * 2 / 3;
-    mvwputch( win, start, BORDER_COLOR, '>' );
+    mvwaddch( win, start, '>' );
     // NOLINTNEXTLINE(cata-use-named-point-constants)
     mvwhline( win, start + point( 1, 0 ), LINE_OXOX, turn_x - start.x - 1 );
 
@@ -461,16 +478,18 @@ static void draw_connectors( const catacurses::window &win, const point &start,
             bp_chr = LINE_XXXO;
         }
 
-        mvwputch( win, point( turn_x, y ), BORDER_COLOR, bp_chr );
+        mvwaddch( win, point( turn_x, y ), bp_chr );
 
         // draw horizontal line to bodypart title
         mvwhline( win, point( turn_x + 1, y ), LINE_OXOX, last_x - turn_x - 1 );
-        mvwputch( win, point( last_x, y ), BORDER_COLOR, '<' );
+        mvwaddch( win, point( last_x, y ), '<' );
 
         // draw amount of consumed slots by this CBM
+        wattroff( win, BORDER_COLOR );
         const std::string fmt_num = string_format( "(%d)", elem.second );
         mvwprintz( win, point( turn_x + std::max( 1, ( last_x - turn_x - utf8_width( fmt_num ) ) / 2 ), y ),
                    c_yellow, fmt_num );
+        wattron( win, BORDER_COLOR );
     }
 
     // define and draw a proper intersection character
@@ -502,7 +521,8 @@ static void draw_connectors( const catacurses::window &win, const point &start,
         // '^|^'
         bionic_chr = LINE_OXXX;
     }
-    mvwputch( win, point( turn_x, start.y ), BORDER_COLOR, bionic_chr );
+    mvwaddch( win, point( turn_x, start.y ), bionic_chr );
+    wattroff( win, BORDER_COLOR );
 }
 
 //get a text color depending on the power/powering state of the bionic
@@ -574,7 +594,7 @@ void avatar::power_bionics()
     ui_adaptor ui;
     ui.on_screen_resize( [&]( ui_adaptor & ui ) {
         if( hide ) {
-            ui.position( point_zero, point_zero );
+            ui.position( point::zero, point::zero );
             return;
         }
         // Main window
@@ -607,7 +627,7 @@ void avatar::power_bionics()
         // Title window
         const int TITLE_START_Y = START.y + 1;
         const int HEADER_LINE_Y = TITLE_HEIGHT + TITLE_TAB_HEIGHT;
-        w_title = catacurses::newwin( TITLE_HEIGHT, WIDTH - 2, START + point_east );
+        w_title = catacurses::newwin( TITLE_HEIGHT, WIDTH - 2, START + point::east );
 
         const int TAB_START_Y = TITLE_START_Y + 3;
         //w_tabs is the tab bar for passive and active bionic groups
@@ -642,6 +662,7 @@ void avatar::power_bionics()
     ctxt.register_action( "QUIT" );
     ctxt.register_action( "HELP_KEYBINDINGS" );
     ctxt.register_action( "TOGGLE_SAFE_FUEL" );
+    ctxt.register_action( "TOGGLE_SPRITE" );
     ctxt.register_action( "SORT" );
 
     ui.on_redraw( [&]( const ui_adaptor & ) {
@@ -669,9 +690,11 @@ void avatar::power_bionics()
         }
         const int pos_x = WIDTH - 2 - max_width;
         if( get_option < bool >( "CBM_SLOTS_ENABLED" ) ) {
+            wattron( wBio, c_light_gray );
             for( size_t i = 0; i < bps.size(); ++i ) {
-                mvwprintz( wBio, point( pos_x, i + list_start_y ), c_light_gray, bps[i] );
+                mvwprintw( wBio, point( pos_x, i + list_start_y ), bps[i] );
             }
+            wattroff( wBio, c_light_gray );
         }
 
         if( current_bionic_list->empty() ) {
@@ -778,7 +801,7 @@ void avatar::power_bionics()
             menu_mode = ACTIVATING;
 
             if( action == "CONFIRM" && !current_bionic_list->empty() ) {
-                auto &bio_list = tab_mode == TAB_ACTIVE ? active : passive;
+                sorted_bionics &bio_list = tab_mode == TAB_ACTIVE ? active : passive;
                 tmp = bio_list[cursor];
             } else {
                 tmp = bionic_by_invlet( ch );
@@ -831,7 +854,7 @@ void avatar::power_bionics()
             // switches between activation and examination
             menu_mode = menu_mode == ACTIVATING ? EXAMINING : ACTIVATING;
         } else if( action == "TOGGLE_SAFE_FUEL" ) {
-            auto &bio_list = tab_mode == TAB_ACTIVE ? active : passive;
+            sorted_bionics &bio_list = tab_mode == TAB_ACTIVE ? active : passive;
             if( !current_bionic_list->empty() ) {
                 tmp = bio_list[cursor];
                 if( !tmp->info().fuel_opts.empty() || tmp->info().is_remote_fueled ) {
@@ -841,13 +864,19 @@ void avatar::power_bionics()
                     popup( _( "You can't toggle fuel saving mode on a non-fueled CBM." ) );
                 }
             }
+        } else if( action == "TOGGLE_SPRITE" ) {
+            sorted_bionics &bio_list = tab_mode == TAB_ACTIVE ? active : passive;
+            if( !current_bionic_list->empty() ) {
+                tmp = bio_list[cursor];
+                tmp->show_sprite = !tmp->show_sprite;
+            }
         } else if( action == "SORT" ) {
             uistate.bionic_sort_mode = pick_sort_mode();
             // FIXME: is there a better way to resort?
             active = filtered_bionics( *my_bionics, TAB_ACTIVE );
             passive = filtered_bionics( *my_bionics, TAB_PASSIVE );
         } else if( action == "CONFIRM" || action == "ANY_INPUT" ) {
-            auto &bio_list = tab_mode == TAB_ACTIVE ? active : passive;
+            sorted_bionics &bio_list = tab_mode == TAB_ACTIVE ? active : passive;
             if( action == "CONFIRM" && !current_bionic_list->empty() ) {
                 tmp = bio_list[cursor];
             } else {
@@ -882,7 +911,7 @@ void avatar::power_bionics()
             const bionic_data &bio_data = bio_id.obj();
             if( menu_mode == ACTIVATING ) {
                 if( bio_data.activated ) {
-                    int b = tmp - &( *my_bionics )[0];
+                    int b = tmp - my_bionics->data();
                     bionic &bio = ( *my_bionics )[b];
                     hide = true;
                     ui.mark_resize();
@@ -913,7 +942,7 @@ void avatar::power_bionics()
                                     break;
                                 case 1:
                                     // TODO: Move to function, create activity and add tool requirements
-                                    if( cata::optional<item> weapon = bio.uninstall_weapon() ) {
+                                    if( std::optional<item> weapon = bio.uninstall_weapon() ) {
                                         i_add_or_drop( *weapon );
                                     }
                                     break;
@@ -959,7 +988,7 @@ void avatar::power_bionics()
                             } else {
                                 activate_bionic( bio, false, &close_ui );
                                 // Exit this ui if we are firing a complex bionic
-                                if( close_ui && tmp->get_weapon().ammo_remaining( this ) ) {
+                                if( close_ui && tmp->get_weapon().shots_remaining( this ) > 0 ) {
                                     break;
                                 }
                             }

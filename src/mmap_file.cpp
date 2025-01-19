@@ -16,8 +16,9 @@
 
 #endif
 
-#include <ghc/fs_std_fwd.hpp>
+#include <filesystem>
 
+#include "cata_scope_helpers.h"
 #include "cata_utility.h"
 
 mmap_file::mmap_file() = default;
@@ -64,10 +65,10 @@ struct mmap_file::handle {
 
 std::shared_ptr<mmap_file> mmap_file::map_file( const std::string &file_path )
 {
-    return map_file( fs::u8path( file_path ) );
+    return map_file( std::filesystem::u8path( file_path ) );
 }
 
-std::shared_ptr<mmap_file> mmap_file::map_file( const fs::path &file_path )
+std::shared_ptr<mmap_file> mmap_file::map_file( const std::filesystem::path &file_path )
 {
     std::shared_ptr<mmap_file> mapped_file;
 
@@ -76,10 +77,10 @@ std::shared_ptr<mmap_file> mmap_file::map_file( const fs::path &file_path )
                              file_path.native().c_str(),
                              GENERIC_READ,
                              FILE_SHARE_READ | FILE_SHARE_DELETE,
-                             NULL,
+                             nullptr,
                              OPEN_EXISTING,
                              0,
-                             NULL
+                             nullptr
                          );
     if( file_handle == INVALID_HANDLE_VALUE ) {
         // Failed to open file.
@@ -92,13 +93,13 @@ std::shared_ptr<mmap_file> mmap_file::map_file( const fs::path &file_path )
     }
     HANDLE file_mapping_handle = CreateFileMappingW(
                                      file_handle,
-                                     NULL,
+                                     nullptr,
                                      PAGE_READONLY,
                                      0,
                                      0,
-                                     NULL
+                                     nullptr
                                  );
-    if( file_mapping_handle == NULL ) {
+    if( file_mapping_handle == nullptr ) {
         return mapped_file;
     }
     void *map_base = MapViewOfFile(
@@ -121,7 +122,7 @@ std::shared_ptr<mmap_file> mmap_file::map_file( const fs::path &file_path )
 #else
     const std::string &file_path_string = file_path.native();
     std::error_code ec;
-    size_t file_size = fs::file_size( file_path_string.c_str(), ec );
+    size_t file_size = std::filesystem::file_size( file_path, ec );
     if( ec ) {
         return mapped_file;
     }

@@ -4,12 +4,14 @@
 
 #include <array>
 #include <map>
+#include <unordered_map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "condition.h"
 #include "damage.h"
-#include "optional.h"
 #include "translation.h"
 #include "type_id.h"
 
@@ -32,15 +34,20 @@ struct weakpoint_attack {
     };
 
     // The source of the attack.
-    const Creature *source;
+    Creature *source;
     // The target of the attack.
-    const Creature *target;
+    Creature *target;
     // The weapon used to make the attack.
     const item *weapon;
     // The type of the attack.
     attack_type type;
     // Whether the attack from a thrown object.
     bool is_thrown;
+    /**
+    * How accurate the ranged attack is.
+    * -1.0 means not a ranged attack.
+    */
+    double accuracy = -1.0;
     // Whether the attack a critical hit.
     bool is_crit;
     // The Creature's skill in hitting weak points.
@@ -57,6 +64,8 @@ struct weakpoint_attack {
 struct weakpoint_effect {
     // The type of the effect.
     efftype_id effect;
+    // Effect on condition, that would be run.
+    std::vector<effect_on_condition_id> effect_on_conditions;
     // The percent chance of causing the effect.
     float chance;
     // Whether the effect is permanent.
@@ -92,9 +101,9 @@ struct weakpoint_family {
     // Name of proficiency corresponding to the family.
     proficiency_id proficiency;
     // The skill bonus for having the proficiency.
-    cata::optional<float> bonus;
+    std::optional<float> bonus;
     // The skill penalty for not having the proficiency.
-    cata::optional<float> penalty;
+    std::optional<float> penalty;
 
     float modifier( const Character &attacker ) const;
     void load( const JsonValue &jsin );
@@ -123,22 +132,26 @@ struct weakpoint {
     translation name;
     // Percent chance of hitting the weakpoint. Can be increased by skill.
     float coverage = 100.0f;
+    // Separate wp that benefit attacker and hurt monster from wp that do not
+    bool is_good = true;
     // Multiplier for existing armor values. Defaults to 1.
-    std::array<float, static_cast<int>( damage_type::NUM )> armor_mult;
+    std::unordered_map<damage_type_id, float> armor_mult;
     // Flat penalty to armor values. Applied after the multiplier.
-    std::array<float, static_cast<int>( damage_type::NUM )> armor_penalty;
+    std::unordered_map<damage_type_id, float> armor_penalty;
     // Damage multipliers. Applied after armor.
-    std::array<float, static_cast<int>( damage_type::NUM )> damage_mult;
+    std::unordered_map<damage_type_id, float> damage_mult;
     // Critical damage multipliers. Applied after armor instead of damage_mult, if the attack is a crit.
-    std::array<float, static_cast<int>( damage_type::NUM )>crit_mult;
-    // A list of required effects.
-    std::vector<efftype_id> required_effects;
+    std::unordered_map<damage_type_id, float> crit_mult;
+    // Dialogue conditions of weakpoint
+    std::function<bool( const_dialogue const & )> condition;
+    bool has_condition = false;
     // A list of effects that may trigger by hitting this weak point.
     std::vector<weakpoint_effect> effects;
     // Constant coverage multipliers, depending on the attack type.
     weakpoint_difficulty coverage_mult;
     // Difficulty gates, varying by the attack type.
     weakpoint_difficulty difficulty;
+    bool is_head = false;
 
     weakpoint();
     // Gets translated name
@@ -151,6 +164,7 @@ struct weakpoint {
     // Return the change of the creature hitting the weakpoint.
     float hit_chance( const weakpoint_attack &attack ) const;
     void load( const JsonObject &jo );
+    void check() const;
 };
 
 struct weakpoints {
@@ -171,16 +185,19 @@ struct weakpoints {
     // load inline definition
     void load( const JsonArray &ja );
     void remove( const JsonArray &ja );
+    void finalize();
+    void check() const;
 
     /********************* weakpoint_set handling ****************************/
     // load standalone JSON type
-    void load( const JsonObject &jo, const std::string &src );
+    void load( const JsonObject &jo, std::string_view src );
     void add_from_set( const weakpoints_id &set_id, bool replace_id );
     void add_from_set( const weakpoints &set, bool replace_id );
     void del_from_set( const weakpoints_id &set_id );
     void del_from_set( const weakpoints &set );
     static void load_weakpoint_sets( const JsonObject &jo, const std::string &src );
     static void reset();
+    static void finalize_all();
     static const std::vector<weakpoints> &get_all();
 };
 

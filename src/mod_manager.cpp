@@ -24,11 +24,22 @@ static const mod_id MOD_INFORMATION_user_default( "user:default" );
 
 static const std::string MOD_SEARCH_FILE( "modinfo.json" );
 
+mod_id get_mod_base_id_from_src( mod_id src )
+{
+    mod_id base_mod_id;
+    size_t split_loc = src.str().find( '#' );
+    if( split_loc == std::string::npos ) {
+        return src;
+    } else {
+        return mod_id( src.str().substr( 0, split_loc ) );
+    }
+}
+
 template<>
 const MOD_INFORMATION &string_id<MOD_INFORMATION>::obj() const
 {
     const auto &map = world_generator->get_mod_manager().mod_map;
-    const auto iter = map.find( *this );
+    const auto iter = map.find( get_mod_base_id_from_src( *this ) );
     if( iter == map.end() ) {
         debugmsg( "Invalid mod %s requested", str() );
         static const MOD_INFORMATION dummy{};
@@ -70,6 +81,7 @@ const std::vector<std::pair<std::string, translation>> &get_mod_list_categories(
         {"item_exclude", to_translation( "ITEM EXCLUSION MODS" )},
         {"monster_exclude", to_translation( "MONSTER EXCLUSION MODS" )},
         {"graphical", to_translation( "GRAPHICAL MODS" )},
+        {"accessibility", to_translation( "ACCESSIBILITY MODS" )},
         {"", to_translation( "NO CATEGORY" )}
     };
 
@@ -143,6 +155,10 @@ void mod_manager::refresh_mod_list()
 {
     clear();
 
+    if( !dir_exist( PATH_INFO::user_moddir() ) ) {
+        assure_dir_exist( PATH_INFO::user_moddir() );
+    }
+
     std::map<mod_id, std::vector<mod_id>> mod_dependency_map;
     load_mods_from( PATH_INFO::moddir() );
     load_mods_from( PATH_INFO::user_moddir_path() );
@@ -198,6 +214,9 @@ bool mod_manager::set_default_mods( const mod_id &ident )
 
 void mod_manager::load_mods_from( const cata_path &path )
 {
+    if( !dir_exist( path.get_unrelative_path() ) ) {
+        return; // don't try to enumerate non-existing directories
+    }
     for( cata_path &mod_file : get_files_from_path( MOD_SEARCH_FILE, path, true ) ) {
         load_mod_info( mod_file );
     }
@@ -211,13 +230,16 @@ void mod_manager::load_modfile( const JsonObject &jo, const cata_path &path )
         return;
     }
 
-    // TEMPORARY until 0.G: Remove "ident" support
-    const mod_id m_ident( jo.has_string( "ident" ) ? jo.get_string( "ident" ) : jo.get_string( "id" ) );
+    const mod_id m_ident( jo.get_string( "id" ) );
     // can't use string_id::is_valid as the global mod_manger instance does not exist yet
     if( mod_map.count( m_ident ) > 0 ) {
         // TODO: change this to make unique ident for the mod
         // (instead of discarding it?)
         debugmsg( "there is already a mod with ident %s", m_ident.c_str() );
+        return;
+    }
+    if( m_ident.str().find( '#' ) != std::string::npos ) {
+        debugmsg( "Mod id %s contains illegal '#' character.", m_ident.str() );
         return;
     }
 
@@ -263,6 +285,7 @@ void mod_manager::load_modfile( const JsonObject &jo, const cata_path &path )
     assign( jo, "dependencies", modfile.dependencies );
     assign( jo, "core", modfile.core );
     assign( jo, "obsolete", modfile.obsolete );
+    assign( jo, "loading_images", modfile.loading_images );
 
     if( std::find( modfile.dependencies.begin(), modfile.dependencies.end(),
                    modfile.ident ) != modfile.dependencies.end() ) {
@@ -324,6 +347,7 @@ bool mod_manager::copy_mod_contents( const t_mod_list &mods_to_copy,
         }
 
         // create needed directories
+        // NOLINTNEXTLINE(cata-translate-string-literal)
         const cata_path cur_mod_dir = output_base_path / string_format( "mod_%05d", i + 1 );
 
         std::queue<cata_path> dir_to_make;
@@ -374,7 +398,7 @@ void mod_manager::load_mod_info( const cata_path &info_file_path )
 
 cata_path mod_manager::get_mods_list_file( const WORLD *world )
 {
-    return world->folder_path_path() / "mods.json";
+    return world->folder_path() / "mods.json";
 }
 
 void mod_manager::save_mods_list( const WORLD *world ) const

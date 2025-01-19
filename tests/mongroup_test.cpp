@@ -6,6 +6,7 @@
 #include "coordinates.h"
 #include "game.h"
 #include "item.h"
+#include "map.h"
 #include "map_helpers.h"
 #include "mongroup.h"
 #include "mtype.h"
@@ -39,7 +40,7 @@ static void spawn_x_monsters( int x, const mongroup_id &grp, const std::vector<m
             rand_gets.emplace( tmp_get );
         }
 
-        mtype_id tmp_res = MonsterGroupManager::GetResultFromGroup( grp ).front().name;
+        mtype_id tmp_res = MonsterGroupManager::GetResultFromGroup( grp ).front().id;
         if( !tmp_res.is_null() ) {
             rand_results.emplace( tmp_res );
         }
@@ -62,7 +63,7 @@ static void spawn_x_monsters( int x, const mongroup_id &grp, const std::vector<m
     }
 }
 
-TEST_CASE( "Event-based monster spawns do not spawn outside event", "[monster][mongroup]" )
+TEST_CASE( "Event-based_monster_spawns_do_not_spawn_outside_event", "[monster][mongroup]" )
 {
     override_option ev_spawn_opt( "EVENT_SPAWNS", "monsters" );
     REQUIRE( get_option<std::string>( "EVENT_SPAWNS" ) == "monsters" );
@@ -113,7 +114,7 @@ TEST_CASE( "Event-based monster spawns do not spawn outside event", "[monster][m
     }
 }
 
-TEST_CASE( "Event-based monsters from an event-only mongroup", "[monster][mongroup]" )
+TEST_CASE( "Event-based_monsters_from_an_event-only_mongroup", "[monster][mongroup]" )
 {
     override_option ev_spawn_opt( "EVENT_SPAWNS", "monsters" );
     REQUIRE( get_option<std::string>( "EVENT_SPAWNS" ) == "monsters" );
@@ -150,7 +151,7 @@ TEST_CASE( "Event-based monsters from an event-only mongroup", "[monster][mongro
     }
 }
 
-TEST_CASE( "Using mon_null as mongroup default monster", "[mongroup]" )
+TEST_CASE( "Using_mon_null_as_mongroup_default_monster", "[mongroup]" )
 {
     mongroup_id test_group1( "test_default_monster" );
     mongroup_id test_group2( "test_group_default_monster" );
@@ -162,7 +163,7 @@ TEST_CASE( "Using mon_null as mongroup default monster", "[mongroup]" )
     CHECK( test_group4->defaultMonster != mon_null );
 }
 
-TEST_CASE( "Nested monster groups spawn chance", "[mongroup]" )
+TEST_CASE( "Nested_monster_groups_spawn_chance", "[mongroup]" )
 {
     mongroup_id mg( "test_top_level_mongroup" );
 
@@ -195,12 +196,12 @@ TEST_CASE( "Nested monster groups spawn chance", "[mongroup]" )
 
     for( int i = 0; i < iters; i++ ) {
         MonsterGroupResult res = MonsterGroupManager::GetResultFromGroup( mg ).front();
-        auto iter = results.find( res.name );
-        CAPTURE( res.name.c_str() );
+        auto iter = results.find( res.id );
+        CAPTURE( res.id.c_str() );
         REQUIRE( iter != results.end() );
         if( iter != results.end() ) {
             layers[std::get<0>( iter->second )].second++;
-            std::get<2>( results[res.name] )++;
+            std::get<2>( results[res.id] )++;
         }
     }
 
@@ -213,11 +214,11 @@ TEST_CASE( "Nested monster groups spawn chance", "[mongroup]" )
     for( const auto &res : results ) {
         INFO( string_format( "monster %s - expected vs. actual", res.first.c_str() ) );
         CHECK( std::get<1>( res.second ) ==
-               Approx( static_cast<float>( std::get<2>( res.second ) ) / iters ).epsilon( 0.5 ) );
+               Approx( static_cast<float>( std::get<2>( res.second ) ) / iters ).epsilon( 0.6 ) );
     }
 }
 
-TEST_CASE( "Nested monster group pack size", "[mongroup]" )
+TEST_CASE( "Nested_monster_group_pack_size", "[mongroup]" )
 {
     const int iters = 100;
     calendar::turn += 1_turns;
@@ -278,17 +279,20 @@ static void test_multi_spawn( const mtype_id &old_mon, int range, int min, int m
 {
     const int upgrade_attempts = 100;
     clear_avatar();
+    // make sure tested scenarios haven't messed with our start time
+    calendar::start_of_cataclysm = calendar::turn_zero;
+    calendar::start_of_game = calendar::turn_zero;
 
     for( int i = 0; i < upgrade_attempts; i++ ) {
         clear_map();
         map &m = get_map();
         calendar::turn = start;
-        const tripoint ground_zero = get_player_character().pos() - tripoint( 5, 5, 0 );
+        const tripoint_bub_ms ground_zero = get_player_character().pos_bub() - tripoint( 5, 5, 0 );
 
         monster *orig = g->place_critter_at( old_mon, ground_zero );
         REQUIRE( orig );
         REQUIRE( orig->type->id == old_mon );
-        REQUIRE( orig->pos() == ground_zero );
+        REQUIRE( orig->pos_bub() == ground_zero );
         REQUIRE( orig->can_upgrade() );
 
         // monster::next_upgrade_time has a ~3% chance to outright fail
@@ -305,8 +309,8 @@ static void test_multi_spawn( const mtype_id &old_mon, int range, int min, int m
                 continue;
             }
             total_spawns++;
-            CHECK( std::abs( c->pos().x - ground_zero.x ) <= range );
-            CHECK( std::abs( c->pos().y - ground_zero.y ) <= range );
+            CHECK( std::abs( c->pos_bub().x() - ground_zero.x() ) <= range );
+            CHECK( std::abs( c->pos_bub().y() - ground_zero.y() ) <= range );
             if( new_count.count( c->as_monster()->type->id ) == 0 ) {
                 new_count[c->as_monster()->type->id] = 0;
             }

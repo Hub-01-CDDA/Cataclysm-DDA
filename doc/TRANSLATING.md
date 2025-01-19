@@ -111,7 +111,7 @@ have alternate translations depending on the gender of the conversation
 participants.  This two pieces of initial configuration.
 
 1. The dialogue must have the relevant genders listed in the json file defining
-   it.  See [the NPC docs](NPCs.md).
+   it.  See [the NPC docs](./JSON/NPCs.md).
 2. Each language must specify the genders it wishes to use via the translation
    of `grammatical gender list`.  This should be a space-separated list of
    genders used in this language for such translations.  Don't add genders here
@@ -211,16 +211,16 @@ translated:
 const char *translated = pgettext("The color", "blue")
 ```
 
-#### `ngettext()`
+#### `n_gettext()`
 
-Some languages have complex rules for plural forms. `ngettext` can be used to
+Some languages have complex rules for plural forms. `n_gettext` can be used to
 translate these plurals correctly. Its first parameter is the untranslated
 string in singular form, the second parameter is the untranslated string in
 plural form and the third one is used to determine which one of the first two
 should be used at run time:
 
 ```c++
-const char *translated = ngettext("one zombie", "many zombies", num_of_zombies)
+const char *translated = n_gettext("one zombie", "many zombies", num_of_zombies)
 ```
 
 ### `translation`
@@ -290,9 +290,10 @@ translation name{ translation::plural_tag() };
 jsobj.read( "name", name );
 ```
 
-If neither "str_pl" nor "str_sp" is specified, the plural form defaults to the
-singular form + "s". However, "str_pl" may still be needed if the unit test cannot
-determine whether the correct plural form can be formed by simply appending "s".
+If neither `"str_pl"` nor `"str_sp"` is specified, the plural form defaults to
+the singular form + "s". However, `"str_pl"` may still be needed if the unit
+test cannot determine whether the correct plural form can be formed by simply
+appending "s".
 
 You can also add comments for translators by writing it like below (the order
 of the entries does not matter):
@@ -310,6 +311,16 @@ Do note that the JSON syntax is only supported if a JSON value is read using
 you also need to update `extract_json_strings.py` and run `lang/update_pot.sh`
 to ensure that the strings are correctly extracted for translation, and run the
 unit test to fix text styling issues reported by the `translation` class.
+
+If a string doesn't need to be translated, you can write `"NO_I18N"` in the
+`"//~"` comment, and this string will not be available to translators (see [here](/doc/JSON/JSON_INFO.md#translatable-strings)):
+
+```JSON
+"name": {
+    "//~": "NO_I18N",
+    "str": "Fake Monster-Only Spell"
+}
+```
 
 ### Static string variables
 
@@ -348,7 +359,14 @@ See the [gettext manual][6] for more information.
 
 ## Maintainers
 
-Several steps need to be done in the correct order to correctly merge and maintain the translation files.
+### Automated updates
+
+Under normal circumstances the translation files are updated automatically by a
+weekly GitHub workflow called `pull-translations`.
+
+### Manual updates
+
+If for some reason you wish to update the translation files by hand, several steps need to be done in the correct order to correctly merge and maintain them.
 
 There are scripts available for these, so usually the process will be as follows:
 
@@ -372,6 +390,15 @@ If your system locale is different from the one you want to test, the easiest wa
 So for example if your local language is New Zealand English (en_NZ), and you want to test the Russian (ru) translation, the steps would be `lang/compile_mo.sh ru`, `mv lang/mo/ru lang/mo/en_NZ`, `./cataclysm`.
 
 You can also change the language in game options if both are installed.
+
+### Language stats
+
+We also store some statistics for how complete each translation is, in
+`src/lang_stats.inc`.  This can be used for example to show end users some
+information about the translations.
+
+These stats are also normally updated by the GitHub workflow, but can be
+updated by hand via `lang/update_stats.sh`.
 
 [1]: https://www.transifex.com/cataclysm-dda-translators/cataclysm-dda/
 [2]: https://discourse.cataclysmdda.org/c/game-talk/translations-team-discussion

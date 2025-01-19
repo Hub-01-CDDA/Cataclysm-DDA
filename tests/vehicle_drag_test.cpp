@@ -31,7 +31,7 @@ static void clear_game_drag( const ter_id &terrain )
     Character &player_character = get_player_character();
     // Move player somewhere safe
     CHECK( !player_character.in_vehicle );
-    player_character.setpos( tripoint_zero );
+    player_character.setpos( tripoint_bub_ms::zero );
     // Blind the player to avoid needless drawing-related overhead
     player_character.add_effect( effect_blind, 1_turns, true );
     // Make sure the ST is 8 so that muscle powered results are consistent
@@ -41,14 +41,14 @@ static void clear_game_drag( const ter_id &terrain )
 
     map &here = get_map();
     // hard force a rebuild of caches
-    here.shift( point_south );
-    here.shift( point_north );
+    here.shift( point_rel_sm::south );
+    here.shift( point_rel_sm::north );
 }
 
 static vehicle *setup_drag_test( const vproto_id &veh_id )
 {
     clear_vehicles();
-    const tripoint map_starting_point( 60, 60, 0 );
+    const tripoint_bub_ms map_starting_point( 60, 60, 0 );
     vehicle *veh_ptr = get_map().add_vehicle( veh_id, map_starting_point, -90_degrees, 0, 0 );
 
     REQUIRE( veh_ptr != nullptr );
@@ -59,8 +59,8 @@ static vehicle *setup_drag_test( const vproto_id &veh_id )
     // Remove all items from cargo to normalize weight.
     // turn everything on
     for( const vpart_reference &vp : veh_ptr->get_all_parts() ) {
-        veh_ptr->get_items( vp.part_index() ).clear();
-        veh_ptr->toggle_specific_part( vp.part_index(), true );
+        veh_ptr->get_items( vp.part() ).clear();
+        vp.part().enabled = true;
     }
     // close the doors
     const auto doors = veh_ptr->get_avail_parts( "OPENABLE" );
@@ -121,7 +121,7 @@ static bool test_drag(
     if( !valid ) {
         printf( "    { \"%s\": [ %f, %f, %f, %d, %d ] },\n",
                 veh_id.c_str(), c_air, c_rolling, c_water, safe_v, max_v );
-        fflush( stdout );
+        static_cast<void>( fflush( stdout ) );
     }
     return valid;
 }
@@ -129,7 +129,7 @@ static bool test_drag(
 static void print_drag_test_strings( const vproto_id &veh )
 {
     test_drag( veh );
-    fflush( stdout );
+    static_cast<void>( fflush( stdout ) );
 }
 
 static void test_vehicle_drag( std::pair<const vproto_id, std::vector<double>> &veh_drag )

@@ -2,10 +2,12 @@
 #include <list>
 #include <memory>
 #include <new>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "avatar.h"
 #include "cached_options.h"
 #include "calendar.h"
 #include "cata_catch.h"
@@ -18,7 +20,8 @@
 #include "map_test_case.h"
 #include "mapdata.h"
 #include "mtype.h"
-#include "optional.h"
+#include "options_helpers.h"
+#include "player_helpers.h"
 #include "point.h"
 #include "type_id.h"
 #include "units.h"
@@ -42,9 +45,11 @@ static const ter_str_id ter_t_flat_roof( "t_flat_roof" );
 static const ter_str_id ter_t_floor( "t_floor" );
 static const ter_str_id ter_t_utility_light( "t_utility_light" );
 static const ter_str_id ter_t_window_frame( "t_window_frame" );
+static const ter_str_id ter_t_window_stained_green( "t_window_stained_green" );
 
 static const trait_id trait_MYOPIC( "MYOPIC" );
 
+static const vpart_id vpart_inboard_mirror( "inboard_mirror" );
 static const vproto_id vehicle_prototype_meth_lab( "meth_lab" );
 static const vproto_id vehicle_prototype_vehicle_camera_test( "vehicle_camera_test" );
 
@@ -63,7 +68,7 @@ static std::string vision_test_info( map_test_case &t )
     using namespace map_test_case_common;
 
     out << "origin: " << t.get_origin() << '\n';
-    out << "player: " << get_player_character().pos() << '\n';
+    out << "player: " << get_player_character().pos_bub() << '\n';
     out << "unimpaired_range: " << get_player_character().unimpaired_range()  << '\n';
     out << "vision_threshold: " << here.get_visibility_variables_cache().vision_threshold << '\n';
 
@@ -97,14 +102,10 @@ static void assert_tile_light_level( map_test_case::tile t )
 static const time_point midnight = calendar::turn_zero + 0_hours;
 static const time_point day_time = calendar::turn_zero + 9_hours + 30_minutes;
 
-
-
-
-
 using namespace map_test_case_common;
 using namespace map_test_case_common::tiles;
 
-auto static const ter_set_flat_roof_above = ter_set( ter_t_flat_roof, tripoint_above );
+static const tile_predicate ter_set_flat_roof_above = ter_set( ter_t_flat_roof, tripoint::above );
 
 static bool spawn_moncam( map_test_case::tile tile )
 {
@@ -125,6 +126,7 @@ static const tile_predicate set_up_tiles_common =
     ifchar( '#', ter_set( ter_t_brick_wall ) + ter_set_flat_roof_above ) ||
     ifchar( '=', ter_set( ter_t_window_frame ) + ter_set_flat_roof_above ) ||
     ifchar( '-', ter_set( ter_t_floor ) + ter_set_flat_roof_above ) ||
+    ifchar( 'G', ter_set( ter_t_window_stained_green ) + ter_set_flat_roof_above ) ||
     fail;
 
 struct vision_test_flags {
@@ -152,14 +154,15 @@ struct vision_test_case {
 
     void test_all() const {
         Character &player_character = get_player_character();
-        g->place_player( tripoint( 60, 60, 0 ) );
-        player_character.worn.clear(); // Remove any light-emitting clothing
+        g->place_player( { 60, 60, 0 } );
+        player_character.clear_worn(); // Remove any light-emitting clothing
         player_character.clear_effects();
         player_character.clear_bionics();
         player_character.clear_mutations(); // remove mutations that potentially affect vision
         player_character.clear_moncams();
-        clear_map();
+        clear_map( -2, OVERMAP_HEIGHT );
         g->reset_light_level();
+        scoped_weather_override weather_clear( WEATHER_CLEAR );
 
         REQUIRE( !player_character.is_blind() );
         REQUIRE( !player_character.in_sleep_state() );
@@ -178,7 +181,7 @@ struct vision_test_case {
             t.set_anchor_char_from( {anchor_char} );
         }
         REQUIRE( t.anchor_char.has_value() );
-        t.anchor_map_pos = player_character.pos();
+        t.anchor_map_pos = player_character.pos_bub();
 
         if( flags.crouching ) {
             player_character.set_movement_mode( move_mode_crouch );
@@ -198,30 +201,30 @@ struct vision_test_case {
             player_character.set_mutation( trait_MYOPIC );
         }
 
-        // test both 2d and 3d cases
-        restore_on_out_of_scope<bool> restore_fov_3d( fov_3d );
-        fov_3d = GENERATE( false, true );
-
         std::stringstream section_name;
         section_name << section_prefix;
-        section_name << ( fov_3d ? "3d" : "2d" ) << "_casting__";
         section_name << t.generate_transform_combinations();
 
         // Sanity check on player placement in relation to `t`
         // must be invoked after transformations are applied to `t`
-        t.validate_anchor_point( player_character.pos() );
+        t.validate_anchor_point( player_character.pos_bub() );
 
         SECTION( section_name.str() ) {
             t.for_each_tile( set_up_tiles );
-            int zlev = t.get_origin().z;
+            int zlev = t.get_origin().z();
             map &here = get_map();
             // We have to run the whole thing twice, because the first time through the
             // player's vision_threshold is based on the previous lighting level (so
             // they might, for example, have poor nightvision due to having just been
             // in daylight)
+            here.invalidate_visibility_cache();
             here.update_visibility_cache( zlev );
-            here.invalidate_map_cache( zlev );
+            // make sure floor caches are valid on all zlevels above
+            for( int z = -2; z <= OVERMAP_HEIGHT; z++ ) {
+                here.invalidate_map_cache( z );
+            }
             here.build_map_cache( zlev );
+            here.invalidate_visibility_cache();
             here.update_visibility_cache( zlev );
             here.invalidate_map_cache( zlev );
             here.build_map_cache( zlev );
@@ -235,10 +238,10 @@ struct vision_test_case {
     }
 };
 
-static cata::optional<units::angle> testcase_veh_dir( point const &def, vision_test_case const &t,
+static std::optional<units::angle> testcase_veh_dir( point const &def, vision_test_case const &t,
         map_test_case::tile &tile )
 {
-    cata::optional<units::angle> dir = cata::nullopt;
+    std::optional<units::angle> dir = std::nullopt;
     point const dim( t.setup[0].size(), t.setup.size() );
     if( tile.p_local == def ) {
         dir = 0_degrees;
@@ -423,6 +426,27 @@ TEST_CASE( "vision_crouching_blocks_vision_but_not_light", "[shadowcasting][visi
     t.test_all();
 }
 
+TEST_CASE( "vision_translucent_blocks_vision_but_not_light", "[shadowcasting][vision]" )
+{
+    vision_test_case t{
+        {
+            "###",
+            "#u#",
+            "#G#",
+            "   ",
+        },
+        {
+            "444",
+            "444",
+            "444",
+            "666",
+        },
+        day_time
+    };
+
+    t.test_all();
+}
+
 TEST_CASE( "vision_see_wall_in_moonlight", "[shadowcasting][vision]" )
 {
     const time_point full_moon = calendar::turn_zero + calendar::season_length() / 6;
@@ -534,25 +558,34 @@ TEST_CASE( "vision_single_tile_skylight", "[shadowcasting][vision]" )
 TEST_CASE( "vision_junction_reciprocity", "[vision][reciprocity]" )
 {
     bool player_in_junction = GENERATE( true, false );
+    CAPTURE( player_in_junction );
 
     vision_test_case t {
         player_in_junction ?
         std::vector<std::string>{
-            "u#  ",
-            "-- Z",
+            "###   ",
+            "#u####",
+            "#---z#",
+            "######",
 }:
         std::vector<std::string>{
-            "z#  ",
-            "-- u",
+            "###   ",
+            "#z####",
+            "#---u#",
+            "######",
         },
         player_in_junction ?
         std::vector<std::string>{
-            "4466",
-            "4446",
+            "444666",
+            "444666",
+            "444466",
+            "444466",
 }:
         std::vector<std::string>{
-            "4444",
-            "4444",
+            "666666",
+            "444444",
+            "444444",
+            "444444",
         },
         day_time
     };
@@ -560,14 +593,14 @@ TEST_CASE( "vision_junction_reciprocity", "[vision][reciprocity]" )
     monster *zombie = nullptr;
     tile_predicate spawn_zombie = [&]( map_test_case::tile tile ) {
         zombie = g->place_critter_at( mon_zombie, tile.p );
+        get_map().ter_set( tile.p + tripoint::above, ter_t_flat_roof );
         return true;
     };
 
     t.set_up_tiles =
-        ifchar( 'C', spawn_moncam ) ||
-        ifchar( 'Z', spawn_zombie ) ||
         ifchar( 'z', spawn_zombie ) ||
         t.set_up_tiles;
+    t.flags.headlamp = true;
     t.test_all();
 
     if( player_in_junction ) {
@@ -698,15 +731,15 @@ TEST_CASE( "vision_moncam_basic", "[shadowcasting][vision][moncam]" )
     avatar &u = get_avatar();
     REQUIRE( zombie->sees( u ) == !obstructed );
     if( add_moncam ) {
-        REQUIRE( u.sees( zombie->pos(), true ) );
+        REQUIRE( u.sees( zombie->pos_bub(), true ) );
     } else {
-        REQUIRE( !u.sees( zombie->pos(), true ) );
+        REQUIRE( !u.sees( zombie->pos_bub(), true ) );
     }
 }
 
 TEST_CASE( "vision_moncam_otherz", "[shadowcasting][vision][moncam]" )
 {
-    tripoint const disp = GENERATE( tripoint_below, tripoint_zero, tripoint_above );
+    tripoint const disp = GENERATE( tripoint::below, tripoint::zero, tripoint::above );
     vision_test_case t {
         {
             "-c-",
@@ -731,7 +764,7 @@ TEST_CASE( "vision_moncam_otherz", "[shadowcasting][vision][moncam]" )
     };
 
     tile_predicate spawn_moncam_disp = [&]( map_test_case::tile tile ) {
-        tile_predicate const p = ter_set( ter_t_floor ) + ter_set( ter_t_floor, tripoint_below ) +
+        tile_predicate const p = ter_set( ter_t_floor ) + ter_set( ter_t_floor, tripoint::below ) +
                                  ter_set_flat_roof_above;
         p( tile );
         monster *const slime = g->place_critter_at( mon_test_camera, tile.p + disp );
@@ -786,7 +819,7 @@ TEST_CASE( "vision_vehicle_mirrors", "[shadowcasting][vision][vehicle]" )
         day_time
     };
     tile_predicate spawn_veh = [&]( map_test_case::tile tile ) {
-        cata::optional<units::angle> dir = testcase_veh_dir( {7, 2}, t, tile );
+        std::optional<units::angle> dir = testcase_veh_dir( {7, 2}, t, tile );
         if( dir ) {
             vehicle *v = get_map().add_vehicle( vehicle_prototype_meth_lab, tile.p, *dir, 0, 0 );
             for( const vpart_reference &vp : v->get_avail_parts( "OPENABLE" ) ) {
@@ -832,7 +865,7 @@ TEST_CASE( "vision_vehicle_camera", "[shadowcasting][vision][vehicle]" )
 
     tile_predicate spawn_veh_cam = [&]( map_test_case::tile tile ) {
         // NOLINTNEXTLINE(cata-use-named-point-constants)
-        cata::optional<units::angle> const dir = testcase_veh_dir( { 1, 0 }, t, tile );
+        std::optional<units::angle> const dir = testcase_veh_dir( { 1, 0 }, t, tile );
         if( dir ) {
             vehicle *v =
                 get_map().add_vehicle( vehicle_prototype_vehicle_camera_test, tile.p, *dir, 0, 0 );
@@ -847,6 +880,75 @@ TEST_CASE( "vision_vehicle_camera", "[shadowcasting][vision][vehicle]" )
         ifchar( 'M', spawn_veh_cam ) ||
         t.set_up_tiles;
 
+    t.test_all();
+    clear_vehicles();
+}
+
+TEST_CASE( "vision_vehicle_camera_skew", "[shadowcasting][vision][vehicle][vehicle_fake]" )
+{
+    clear_vehicles();
+    bool const camera_on = GENERATE( true, false );
+    int const fiddle = GENERATE( 0, 1, 2 );
+    vision_test_case t {
+        {
+            "    M",
+            "     ",
+            "     ",
+            "     ",
+            "     ",
+        },
+        camera_on ?
+        std::vector<std::string>{
+            "44611",
+            "44444",
+            "44446",
+            "44446",
+            "44444",
+        }
+:
+        std::vector<std::string>{
+            "66611",
+            "66611",
+            "66666",
+            "66666",
+            "66666",
+        },     day_time
+    };
+
+    vehicle *v = nullptr;
+    tile_predicate spawn_veh_cam = [&]( map_test_case::tile tile ) {
+        std::optional<units::angle> const dir = testcase_veh_dir( { 4, 0 }, t, tile );
+        if( dir ) {
+            units::angle const skew = *dir + 45_degrees;
+            v = get_map().add_vehicle( vehicle_prototype_vehicle_camera_test, tile.p, skew, 0,
+                                       0 );
+            v->camera_on = camera_on;
+        }
+        return true;
+    };
+
+    auto const fiddle_parts = [&]() {
+        if( fiddle > 0 ) {
+            std::vector<vehicle_part *> const horns = v->get_parts_at( v->pos_bub(), "HORN", {} );
+            v->remove_part( *horns.front() );
+        }
+        if( fiddle > 1 ) {
+            REQUIRE( v->install_part( point_rel_ms::zero, vpart_inboard_mirror ) != -1 );
+        }
+        if( fiddle > 0 ) {
+            get_map().add_vehicle_to_cache( v );
+            get_map().invalidate_map_cache( get_avatar().posz() );
+            get_map().build_map_cache( get_avatar().posz() );
+        }
+    };
+
+    t.anchor_char = 'M';
+    t.intermission = fiddle_parts;
+    t.set_up_tiles =
+        ifchar( 'M', spawn_veh_cam ) ||
+        t.set_up_tiles;
+
+    CAPTURE( camera_on, fiddle );
     t.test_all();
     clear_vehicles();
 }
@@ -876,7 +978,7 @@ TEST_CASE( "vision_moncam_invalidation", "[shadowcasting][vision][moncam]" )
 
     tile_predicate spawn_veh_cam = [&]( map_test_case::tile tile ) {
         // NOLINTNEXTLINE(cata-use-named-point-constants)
-        cata::optional<units::angle> const dir = testcase_veh_dir( { 1, 1 }, t, tile );
+        std::optional<units::angle> const dir = testcase_veh_dir( { 1, 1 }, t, tile );
         if( dir ) {
             vehicle *v =
                 get_map().add_vehicle( vehicle_prototype_vehicle_camera_test, tile.p, *dir, 0, 0 );
@@ -894,9 +996,9 @@ TEST_CASE( "vision_moncam_invalidation", "[shadowcasting][vision][moncam]" )
 
     auto wiggle_slime = [&]() {
         // vehicle camera should still work even if only the moncam moved
-        slime->Creature::move_to( slime->get_location() + tripoint_east );
+        slime->Creature::move_to( slime->get_location() + tripoint::east );
         get_map().build_map_cache( slime->posz() );
-        slime->Creature::move_to( slime->get_location() - tripoint_east );
+        slime->Creature::move_to( slime->get_location() - tripoint::east );
         get_map().build_map_cache( slime->posz() );
     };
 
@@ -1006,7 +1108,7 @@ TEST_CASE( "vision_inside_meth_lab", "[shadowcasting][vision][moncam]" )
     };
 
     vehicle *v = nullptr;
-    cata::optional<tripoint> door = cata::nullopt;
+    std::optional<tripoint_bub_ms> door = std::nullopt;
 
     // opens or closes a specific door (marked as 'D')
     // this is called twice: after either vehicle or door is set
@@ -1028,7 +1130,7 @@ TEST_CASE( "vision_inside_meth_lab", "[shadowcasting][vision][moncam]" )
     };
 
     tile_predicate spawn_meth_lab = [&]( map_test_case::tile tile ) {
-        cata::optional<units::angle> dir;
+        std::optional<units::angle> dir;
         if( tile.p_local == point( 2, 0 ) ) {
             dir = 270_degrees;
         } else if( tile.p_local == point( 4, 7 ) ) {
@@ -1057,4 +1159,15 @@ TEST_CASE( "vision_inside_meth_lab", "[shadowcasting][vision][moncam]" )
 
     t.test_all();
     clear_vehicles();
+}
+
+TEST_CASE( "pl_sees-oob-nocrash", "[vision]" )
+{
+    // oob crash from game::place_player_overmap() or game::start_game(), simplified
+    clear_avatar();
+    get_map().load( project_to<coords::sm>( get_avatar().get_location() ) + point::south_east, false,
+                    false );
+    get_avatar().sees( tripoint_bub_ms::zero ); // CRASH?
+
+    clear_avatar();
 }

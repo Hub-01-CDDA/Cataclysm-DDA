@@ -1,3 +1,4 @@
+# Widgets
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
@@ -12,6 +13,7 @@
   - [Variable widgets](#variable-widgets)
     - [Number style](#number-style)
     - [Graph style](#graph-style)
+      - [Vertical graphs](#vertical-graphs)
     - [Text style](#text-style)
 - [Fields](#fields)
   - [label](#label)
@@ -21,7 +23,9 @@
   - [direction](#direction)
   - [height](#height)
   - [text_align and label_align](#text_align-and-label_align)
+  - [pad_labels](#pad_labels)
   - [colors](#colors)
+  - [breaks](#breaks)
   - [flags](#flags)
 - [Clauses and conditions](#clauses-and-conditions)
   - [Conditions](#conditions)
@@ -30,6 +34,7 @@
 - [Variables](#variables)
   - [Numeric variables](#numeric-variables)
   - [Text variables](#text-variables)
+  - [Custom variables](#custom-variables)
 - [Predefined widgets](#predefined-widgets)
   - [Number widgets](#number-widgets)
   - [Graph widgets](#graph-widgets)
@@ -476,7 +481,7 @@ The below widget is a prime example of a text widget, and is used to display a p
       "id": "parched",
       "text": "Parched",
       "color": "light_red",
-      "condition": { "compare_int": [ { "u_val": "thirst" }, ">", { "const": 520 } ] }
+      "condition": { "math": [ "u_val('thirst') > 520" ] }
     },
     {
       "id": "dehydrated",
@@ -484,8 +489,8 @@ The below widget is a prime example of a text widget, and is used to display a p
       "color": "light_red",
       "condition": {
         "and": [
-          { "compare_int": [ { "u_val": "thirst" }, ">", { "const": 240 } ] },
-          { "compare_int": [ { "u_val": "thirst" }, "<=", { "const": 520 } ] }
+          { "math": [ "u_val('thirst') > 240" ] },
+          { "math": [ "u_val('thirst') <= 520" ] }
         ]
       }
     },
@@ -495,8 +500,8 @@ The below widget is a prime example of a text widget, and is used to display a p
       "color": "yellow",
       "condition": {
         "and": [
-          { "compare_int": [ { "u_val": "thirst" }, ">", { "const": 80 } ] },
-          { "compare_int": [ { "u_val": "thirst" }, "<=", { "const": 240 } ] }
+          { "math": [ "u_val('thirst') > 80" ] },
+          { "math": [ "u_val('thirst') <= 240" ] }
         ]
       }
     },
@@ -506,8 +511,8 @@ The below widget is a prime example of a text widget, and is used to display a p
       "color": "yellow",
       "condition": {
         "and": [
-          { "compare_int": [ { "u_val": "thirst" }, ">", { "const": 40 } ] },
-          { "compare_int": [ { "u_val": "thirst" }, "<=", { "const": 80 } ] }
+          { "math": [ "u_val('thirst') > 40" ] },
+          { "math": [ "u_val('thirst') <= 80" ] }
         ]
       }
     },
@@ -517,8 +522,8 @@ The below widget is a prime example of a text widget, and is used to display a p
       "color": "white",
       "condition": {
         "and": [
-          { "compare_int": [ { "u_val": "thirst" }, ">=", { "const": 0 } ] },
-          { "compare_int": [ { "u_val": "thirst" }, "<=", { "const": 40 } ] }
+          { "math": [ "u_val('thirst') >= 0" ] },
+          { "math": [ "u_val('thirst') <= 40" ] }
         ]
       }
     },
@@ -528,8 +533,8 @@ The below widget is a prime example of a text widget, and is used to display a p
       "color": "green",
       "condition": {
         "and": [
-          { "compare_int": [ { "u_val": "thirst" }, ">=", { "const": -20 } ] },
-          { "compare_int": [ { "u_val": "thirst" }, "<", { "const": 0 } ] }
+          { "math": [ "u_val('thirst') >= -20" ] },
+          { "math": [ "u_val('thirst') < 0" ] }
         ]
       }
     },
@@ -539,8 +544,8 @@ The below widget is a prime example of a text widget, and is used to display a p
       "color": "green",
       "condition": {
         "and": [
-          { "compare_int": [ { "u_val": "thirst" }, ">=", { "const": -60 } ] },
-          { "compare_int": [ { "u_val": "thirst" }, "<", { "const": -20 } ] }
+          { "math": [ "u_val('thirst') >= -60" ] },
+          { "math": [ "u_val('thirst') < -20" ] }
         ]
       }
     },
@@ -548,7 +553,7 @@ The below widget is a prime example of a text widget, and is used to display a p
       "id": "turgid",
       "text": "Turgid",
       "color": "green",
-      "condition": { "compare_int": [ { "u_val": "thirst" }, "<", { "const": -60 } ] }
+      "condition": { "math": [ "u_val('thirst') < -60" ] }
     }
   ]
 },
@@ -590,7 +595,7 @@ The English word "place" can be a verb, to put something down. Here "place" is a
 location. The "ctxt" part provides this context to translators so they can choose the most
 appropriate words in other languages.
 
-See the [Translatable strings section of JSON_INFO.md](JSON_INFO.md#translatable-strings)
+See the [Translatable strings section of JSON_INFO.md](JSON/JSON_INFO.md#translatable-strings)
 for more on how these work.
 
 ## string
@@ -600,9 +605,9 @@ If you have a `text` style widget that has no other options for what to display,
 
 ## fill
 
-For "graph" widgets with more than two sybols, different ways of filling up the graph become
+For "graph" widgets with more than two symbols, different ways of filling up the graph become
 possible.  The method is specified with the "fill" field. By default the "bucket" fill method is
-used, but there is also a "pool" method described helow.
+used, but there is also a "pool" method described below.
 
 With "bucket" fill, positions are filled like a row of buckets, using all symbols in the first
 position before beginning to fill the next position.  This is like the classic 5-bar HP meter.
@@ -784,7 +789,7 @@ red, given in a "colors" list:
 }
 ```
 
-Color names may be any of those described in [COLOR.md](COLOR.md). You can also see the available
+Color names may be any of those described in [COLOR.md](user-guides/COLOR.md). You can also see the available
 colors in-game from the "Settings" menu, under "Colors".
 
 Graphs can be colorized in the same way. For example, the classic stamina graph is a 5-character
@@ -887,7 +892,8 @@ how to display them. These take the form of a nested object containing several o
   "clauses": [
     { "id": "bitten", "text": "bitten", "sym": "B", "color": "yellow", "condition": "..." },
     { "id": "infected", "text": "infected", "sym": "I", "color": "pink", "condition": "..." },
-    { "id": "bandaged", "text": "bandaged", "sym": "+", "color": "white", "condition": "..." }
+    { "id": "bandaged", "text": "bandaged", "sym": "+", "color": "white", "condition": "..." },
+    { "id": "some_var", "text": "<color_red>The some_var</color> is <global_val:some_var>", "parse_tags":true , "condition": "..." },
   ]
 }
 ```
@@ -903,13 +909,13 @@ which provides text and color definitions for different bodypart status conditio
 | `color`     | Defines the color for the text derived from this "clause".
 | `value`     | A numeric value for this "clause", which may be interpreted differently based on the context of the parent widget.
 | `widgets`   | For "layout" style widgets, the child widgets used for this "clause".
-| `condition` | A dialogue condition (see [Dialogue conditions](NPCs.md#dialogue-conditions)) that dictates whether this clause will be used or not. If the condition is true (or when no condition is defined), the clause can be used to its text/symbol/color in the widget's value.
-
+| `condition` | A dialogue condition (see [Dialogue conditions](JSON/NPCs.md#dialogue-conditions)) that dictates whether this clause will be used or not. If the condition is true (or when no condition is defined), the clause can be used to its text/symbol/color in the widget's value.
+| `parse_tags`| default false. If true, parse custom entries in `text` before displaying it. This can be used to display global_val or u_val.(see [Special Custom Entries](JSON/NPCs.md#special-custom-entries) for details) You can also use `<color_XXX></color>` to modify the color of your text.
 
 ## Conditions
 
 Widget clauses and conditions can be used to define new widgets completely from JSON, using
-[dialogue conditions](NPCs.md#dialogue-conditions). By omitting the widget's `var` field, the
+[dialogue conditions](JSON/NPCs.md#dialogue-conditions). By omitting the widget's `var` field, the
 widget is interpreted as either a "text", "number", "symbol", or "legend" depending on the given
 `style`. The widget will evaluate each of its clauses to determine which ones to draw values from:
 
@@ -967,7 +973,7 @@ In the example above, the widget would print out the following text:
 # Variable ranges
 
 Widgets using a numeric "var" (those without a `_text` suffix) have a predetermined absolute range
-(minimum and maximum), as well as a predermined normal value or range.  These limits are not
+(minimum and maximum), as well as a predetermined normal value or range.  These limits are not
 customizable in widget JSON, but knowing about them will make it easier to understand how "graph"
 widgets are drawn, and how the "colors" list is mapped to the variable's numeric range.
 
@@ -1017,12 +1023,13 @@ Many vars are numeric in nature. These may use style "number" or style "graph". 
 |--                 |--
 | `cardio_acc`      | Cardio accumulator, integer
 | `cardio_fit`      | Cardio fitness, integer near BMR
-| `fatigue`         | tiredness, 0-600+
+| `sleepiness`         | tiredness, 0-600+
 | `focus`           | focus level, 0-100+
 | `health`          | Current hidden health value, -200 to +200
 | `mana`            | available mana, 0-MAX_MANA
 | `morale_level`    | morale level, -100 to +100
 | `move`            | movement counter, 0-100+
+| `move_remainder`  | remaining moves for the current turn, 0-9999+
 | `pain`            | perceived pain, 0-80+
 | `sound`           | sound, 0-20+
 | `speed`           | speed, 0-500+
@@ -1083,6 +1090,29 @@ Some vars refer to text descriptors. These must use style "text". Examples:
 | `wind_text`              | Wind direction and intensity
 
 
+## Custom variables
+
+Variable widgets with var `custom` can show any variable object or math expression. These widgets
+require a separate `custom_var` field to specify the variable object or math expression in question,
+like so:
+
+```json
+{
+  "var": "custom",
+  "custom_var": {
+    "value": { "var_val": "name" } OR { "math": [ ... ] },
+    "range": [ ... ]
+  }
+}
+```
+
+The `range` field requires 2 to 4 elements, each of which can be an integer, variable object, or
+math expression. The first element specifies the minimum value, the middle element(s) specify the
+normal range, and the last element specifies the maximum value, as descibed in [Variable ranges](#variable-ranges).
+
+All custom variables are numeric and must use style "number" or style "graph".
+
+
 # Predefined widgets
 
 Many widgets for numbers, text, graphs, and layouts are already defined in `data/json/ui/`, and you
@@ -1137,7 +1167,7 @@ Text widget ids typically have a `_desc` suffix.
 | `activity_desc`        | `Activity: Moderate`
 | `date_desc`            | `Date: Summer day 25`
 | `env_temp_desc`        | `Temperature: 65F`
-| `fatigue_desc`         | `Rest: Tired`
+| `sleepiness_desc`         | `Rest: Tired`
 | `health_desc`          | `Health: Good`
 | `hunger_desc`          | `Hunger: Satisfied`
 | `lighting_desc`        | `Lighting: Bright`
@@ -1174,7 +1204,7 @@ This table gives some examples of single-line "columns" layouts:
 | `hitpoints_legs_layout` | `L LEG: \|\|\|\|\|  R LEG: \|\|\|\|\|`
 | `mood_focus_layout` | `Mood: :-)  Focus: 100`
 | `safe_sound_layout` | `Safe: Off  Sound:  15`
-| `sound_fatigue_focus_layout` | `Sound:  15  Fatigue: Fresh  Focus: 100`
+| `sound_sleepiness_focus_layout` | `Sound:  15  Fatigue: Fresh  Focus: 100`
 | `sound_focus_layout` | `Sound:  15  Focus: 100`
 | `stats_layout` | `Str: 9  Dex: 8  Int: 10  Per: 7`
 
